@@ -14,7 +14,9 @@ function download(filename: string, content: string, mime: string): void {
 }
 
 function csvCell(value: string | number | boolean): string {
-  const s = String(value)
+  let s = String(value)
+  // Guard against spreadsheet formula injection (user notes/subjects).
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`
   return s
 }

@@ -92,12 +92,42 @@ npm run dev        # jalankan dev server
 npm run build      # type-check + build produksi
 npm run preview    # sajikan hasil build produksi
 npm run typecheck  # hanya TypeScript
-npm run verify     # 54 asersi logika inti (streak, freeze, statistik, link Spotify)
+npm run verify     # 61 asersi logika inti (streak, freeze, statistik, kripto, ekspor)
 npm run smoke      # uji render end-to-end + penyelesaian timer di jsdom
 ```
 
 Buka URL lokal yang muncul, pilih **Try the demo account**, lalu selesaikan satu
 sesi fokus (pakai Custom timer yang singkat) untuk menyalakan api streak.
+
+---
+
+## ▲ Deploy (Vercel)
+
+Repo ini menyertakan `vercel.json` yang:
+
+- **me-rewrite** path tak dikenal ke `index.html`, sehingga deep link BrowserRouter
+  tetap hidup setelah refresh (tanpa ini, refresh di `/history` menghasilkan 404),
+- memasang **security header** (CSP, `X-Content-Type-Options`, `Referrer-Policy`,
+  `Permissions-Policy`, `frame-ancestors`),
+- meng-cache aset ber-hash secara immutable.
+
+Import repo di Vercel dengan preset Vite (Build `npm run build`, Output `dist`).
+Tidak ada environment variable yang dibutuhkan.
+
+---
+
+## 🔐 Catatan keamanan
+
+- **Password** di-hash dengan PBKDF2-SHA256 (210k iterasi, salt per pengguna);
+  hash single-pass lama masih bisa diverifikasi. Hanya hash yang disimpan.
+- **Threat model**: ini aplikasi client-only. Semua data ada di `localStorage`
+  (dan track yang diunggah di IndexedDB) pada perangkat pengguna — siapa pun yang
+  bisa mengakses profil browser dapat membacanya. Jangan simpan data sensitif;
+  pindah ke backend sungguhan (lihat swap `Repository`) adalah jalan menuju
+  keamanan akun yang sebenarnya.
+- Link Spotify **di-parse dan di-whitelist** sebelum di-embed, jadi sumber iframe
+  sembarangan ditolak.
+- Ekspor CSV **menetralkan formula injection** spreadsheet.
 
 ---
 
@@ -179,11 +209,12 @@ bawah file yang sama.
 
 Proyek ini menyertakan dua suite tes yang bisa dijalankan.
 
-**`npm run verify`** — 54 asersi logika murni yang mencakup day key timezone
+**`npm run verify`** — 61 asersi logika murni yang mencakup day key timezone
 lokal, pertumbuhan/reset/pelacakan streak terpanjang, pencegahan hari ganda,
 ambang kualifikasi, perolehan + pemakaian freeze + larangan pemakaian ganda,
 deteksi perfect week, agregasi statistik, unlock pencapaian, parsing link Spotify,
-dan kasus tepi sesi tengah malam.
+hashing password PBKDF2 (termasuk kompatibilitas hash lama), keamanan formulir
+CSV, dan kasus tepi sesi tengah malam.
 
 **`npm run smoke`** — merender aplikasi *asli* (semua provider + router) di dalam
 jsdom, menyemai user dan sesi lewat repository asli, lalu memastikan bahwa:

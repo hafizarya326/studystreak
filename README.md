@@ -89,12 +89,41 @@ npm run dev        # start the dev server
 npm run build      # type-check + production build
 npm run preview    # serve the production build
 npm run typecheck  # TypeScript only
-npm run verify     # 54 core-logic assertions (streaks, freezes, stats, Spotify links)
+npm run verify     # 61 core-logic assertions (streaks, freezes, stats, crypto, exports)
 npm run smoke      # end-to-end render + timer-completion test in jsdom
 ```
 
 Open the printed local URL, choose **Try the demo account**, and finish a focus
 session (use a short Custom timer) to light the flame.
+
+---
+
+## ▲ Deploying (Vercel)
+
+The repo ships a `vercel.json` that:
+
+- **rewrites** unknown paths to `index.html`, so BrowserRouter deep links survive
+  a refresh (without it, refreshing `/history` returns a 404),
+- sets **security headers** (CSP, `X-Content-Type-Options`, `Referrer-Policy`,
+  `Permissions-Policy`, `frame-ancestors`),
+- caches hashed assets immutably.
+
+Import the repo in Vercel with the Vite preset (Build `npm run build`, Output
+`dist`). No environment variables are required.
+
+---
+
+## 🔐 Security notes
+
+- **Passwords** are hashed with PBKDF2-SHA256 (210k iterations, per-user salt);
+  legacy single-pass hashes still verify. Only hashes are stored.
+- **Threat model**: this is a client-only app. All data lives in `localStorage`
+  (and uploaded tracks in IndexedDB) on the user's device — anyone with access to
+  the browser profile can read it. Do not store anything sensitive; moving to a
+  real backend (see the `Repository` swap) is the path to real account security.
+- Spotify links are **parsed and whitelisted** before being embedded, so arbitrary
+  iframe sources are rejected.
+- CSV exports **neutralise spreadsheet formula injection**.
 
 ---
 
@@ -173,11 +202,12 @@ the same file.
 
 The project ships with two executable test suites.
 
-**`npm run verify`** — 54 pure-logic assertions covering local-timezone day
+**`npm run verify`** — 61 pure-logic assertions covering local-timezone day
 keys, streak growth/reset/longest tracking, duplicate-day prevention, the
 qualifying threshold, freeze earning + consumption + no-duplicate usage,
 perfect-week detection, statistics aggregation, achievement unlocking, Spotify
-link parsing, and the midnight session-boundary edge case.
+link parsing, PBKDF2 password hashing (incl. legacy hash compatibility),
+CSV formula-injection safety, and the midnight session-boundary edge case.
 
 **`npm run smoke`** — renders the *real* app (all providers + router) inside
 jsdom, seeds a user and sessions through the real repository, then asserts that:

@@ -14,6 +14,8 @@ import {
   evaluateAchievements,
 } from '../src/lib/achievements'
 import { parseSpotifyLink, spotifyEmbedUrl } from '../src/lib/music'
+import { hashPassword, makeSalt, verifyPassword } from '../src/lib/crypto'
+import { sessionsToCSV } from '../src/lib/export'
 import type { StudySession } from '../src/types'
 
 let passed = 0
@@ -252,6 +254,42 @@ console.log('\nSpotify link parsing')
     'builds an embed URL',
     spotifyEmbedUrl({ type: 'playlist', id: 'abc' }).startsWith('https://open.spotify.com/embed/playlist/abc'),
   )
+}
+
+console.log('\nPassword hashing')
+{
+  const salt = makeSalt()
+  const hash = await hashPassword('correct horse battery', salt)
+  check('new hashes use PBKDF2', hash.startsWith('pbkdf2:'))
+  check('correct password verifies', await verifyPassword('correct horse battery', salt, hash))
+  check('wrong password is rejected', !(await verifyPassword('wrong password', salt, hash)))
+  check('salt changes the hash', (await hashPassword('same', 'a')) !== (await hashPassword('same', 'b')))
+
+  const enc = new TextEncoder()
+  const digest = await crypto.subtle.digest('SHA-256', enc.encode(`studystreak::${salt}::legacy`))
+  const hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+  check('legacy sha256 hash still verifies', await verifyPassword('legacy', salt, `sha256:${hex}`))
+}
+
+console.log('\nCSV export safety')
+{
+  const s: StudySession = {
+    id: 'csv',
+    userId: 'u',
+    startedAt: Date.now(),
+    endedAt: Date.now() + 60_000,
+    durationSec: 60,
+    type: 'focus',
+    subject: '=HYPERLINK("http://evil")',
+    note: '@SUM(1)',
+    completed: true,
+    modeId: 'pomodoro',
+  }
+  const csv = sessionsToCSV([s])
+  check('formula-injection subject is neutralised', csv.includes(`"'=HYPERLINK`))
+  check('formula-injection note is neutralised', csv.includes(`'@SUM(1)`))
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`)

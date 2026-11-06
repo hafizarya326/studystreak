@@ -1,18 +1,31 @@
 /**
- * Tiny credential hashing helper.
+ * Credential hashing helper.
  *
  * This is a local-first app: credentials never leave the device, but we still
- * avoid storing plaintext passwords. When Supabase (or any real backend) is
- * wired in, replace these calls with the provider's auth — the rest of the app
- * never touches password material directly.
+ * avoid storing plaintext passwords. New passwords use **PBKDF2-SHA256** (slow,
+ * salted, 210k iterations) which resists offline brute force far better than a
+ * single SHA-256 pass. Legacy single-pass hashes (`sha256:` / `h:`) still
+ * verify so existing local accounts keep working.
+ *
+ * When Supabase (or any real backend) is wired in, replace these calls with the
+ * provider's auth — the rest of the app never touches password material.
  */
 
 const encoder = new TextEncoder()
+const PBKDF2_ITERATIONS = 210_000
 
 function toHex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
+}
+
+/** Constant-time-ish string compare so verification doesn't leak via early exit. */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
 }
 
 /** Deterministic fallback for environments without WebCrypto (e.g. non-secure origins). */
@@ -29,6 +42,18 @@ function fallbackHash(input: string): string {
   return (((h2 >>> 0) * 4294967296 + (h1 >>> 0)) >>> 0).toString(16) + (h1 >>> 0).toString(16)
 }
 
+/** Pre-PBKDF2 hash, kept only to verify accounts created before the upgrade. */
+function legacyHash(password: string, salt: string): string {
+  const input = `studystreak::${salt}::${password}`
+  return `h:${fallbackHash(input)}`
+}
+
+async function legacySha256(password: string, salt: string): Promise<string> {
+  const input = `studystreak::${salt}::${password}`
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(input))
+  return `sha256:${toHex(digest)}`
+}
+
 export function makeSalt(): string {
   const bytes = new Uint8Array(16)
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes)
@@ -39,16 +64,27 @@ export function makeSalt(): string {
 }
 
 export async function hashPassword(password: string, salt: string): Promise<string> {
-  const input = `studystreak::${salt}::${password}`
   try {
     if (typeof crypto !== 'undefined' && crypto.subtle) {
-      const digest = await crypto.subtle.digest('SHA-256', encoder.encode(input))
-      return `sha256:${toHex(digest)}`
+      const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, [
+        'deriveBits',
+      ])
+      const bits = await crypto.subtle.deriveBits(
+        {
+          name: 'PBKDF2',
+          salt: encoder.encode(`studystreak::${salt}`),
+          iterations: PBKDF2_ITERATIONS,
+          hash: 'SHA-256',
+        },
+        key,
+        256,
+      )
+      return `pbkdf2:${PBKDF2_ITERATIONS}:${toHex(bits)}`
     }
   } catch {
     /* fall through */
   }
-  return `h:${fallbackHash(input)}`
+  return legacyHash(password, salt)
 }
 
 export async function verifyPassword(
@@ -56,6 +92,15 @@ export async function verifyPassword(
   salt: string,
   expected: string,
 ): Promise<boolean> {
-  const actual = await hashPassword(password, salt)
-  return actual === expected
+  if (expected.startsWith('pbkdf2:')) {
+    return safeEqual(await hashPassword(password, salt), expected)
+  }
+  if (expected.startsWith('sha256:')) {
+    try {
+      return safeEqual(await legacySha256(password, salt), expected)
+    } catch {
+      return false
+    }
+  }
+  return safeEqual(legacyHash(password, salt), expected)
 }
