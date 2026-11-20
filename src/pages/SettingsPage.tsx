@@ -28,6 +28,7 @@ import { useSettings } from '../context/SettingsContext'
 import { useData } from '../context/DataContext'
 import { useToast } from '../context/ToastContext'
 import { exportBackupJSON, exportSessionsCSV } from '../lib/export'
+import { LIMITS } from '../lib/security'
 import type { ThemePreference } from '../types'
 
 const AVATARS = ['🦉', '🐢', '🦊', '🐝', '🌱', '📚', '🚀', '🐬', '🦁', '🌙', '🐼', '🦄']
@@ -36,7 +37,7 @@ const WEEKLY_HOURS_OPTIONS = [5, 8, 10, 12, 15, 20, 25, 30]
 export function SettingsPage() {
   const { user, updateProfile, logout, deleteAccount } = useAuth()
   const { settings, update, reset } = useSettings()
-  const { sessions, clearAllSessions } = useData()
+  const { sessions, achievementState, clearAllSessions } = useData()
   const { push } = useToast()
 
   const [name, setName] = useState(user?.name ?? '')
@@ -71,6 +72,10 @@ export function SettingsPage() {
   const addSubject = () => {
     const value = newSubject.trim()
     if (!value) return
+    if (settings.subjects.length >= LIMITS.subjectsMax) {
+      push({ title: 'Subject limit reached', description: `You can have up to ${LIMITS.subjectsMax} subjects.`, variant: 'error' })
+      return
+    }
     if (settings.subjects.some((s) => s.toLowerCase() === value.toLowerCase())) {
       push({ title: 'Subject already exists', variant: 'error' })
       return
@@ -120,12 +125,13 @@ export function SettingsPage() {
           </div>
           <div className="space-y-4">
             <Field label="Display name">
-              <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
+              <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={LIMITS.name} placeholder="Your name" />
             </Field>
             <Field label="Tagline">
               <TextInput
                 value={tagline}
                 onChange={(e) => setTagline(e.target.value)}
+                maxLength={LIMITS.tagline}
                 placeholder="e.g. Finals in 6 weeks — no days off."
               />
             </Field>
@@ -305,6 +311,7 @@ export function SettingsPage() {
               value={newSubject}
               onChange={(e) => setNewSubject(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addSubject()}
+              maxLength={LIMITS.subject}
               placeholder="e.g. Chemistry"
             />
           </Field>
@@ -325,7 +332,7 @@ export function SettingsPage() {
             variant="outline"
             size="sm"
             onClick={() => {
-              exportBackupJSON({ profile: user, sessions, achievements: {}, settings })
+              exportBackupJSON({ profile: user, sessions, achievements: achievementState, settings })
               push({ title: 'Backup downloaded', variant: 'success' })
             }}
           >

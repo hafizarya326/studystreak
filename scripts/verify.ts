@@ -14,8 +14,20 @@ import {
   evaluateAchievements,
 } from '../src/lib/achievements'
 import { parseSpotifyLink, spotifyEmbedUrl } from '../src/lib/music'
-import { hashPassword, makeSalt, verifyPassword } from '../src/lib/crypto'
+import { hashPassword, makeSalt, needsRehash, verifyPassword } from '../src/lib/crypto'
 import { sessionsToCSV } from '../src/lib/export'
+import {
+  detectAudioMagicBytes,
+  isSafeId,
+  loginRateLimiter,
+  safeJsonParse,
+  sanitizeFilename,
+  sanitizeHttpsUrl,
+  sanitizeSession,
+  sanitizeSettings,
+  sanitizeText,
+  validatePasswordStrength,
+} from '../src/lib/security'
 import type { StudySession } from '../src/types'
 
 let passed = 0
@@ -290,6 +302,104 @@ console.log('\nCSV export safety')
   const csv = sessionsToCSV([s])
   check('formula-injection subject is neutralised', csv.includes(`"'=HYPERLINK`))
   check('formula-injection note is neutralised', csv.includes(`'@SUM(1)`))
+  const csvSpaces = sessionsToCSV([{ ...s, subject: '  =CMD()', note: '|calc' }])
+  check('leading-space formula injection neutralised', csvSpaces.includes(`'  =CMD()`))
+  check('pipe DDE injection neutralised', csvSpaces.includes(`'|calc`))
+}
+
+console.log('\nSecurity hardening')
+{
+  // Prototype pollution guard
+  const polluted = safeJsonParse<Record<string, unknown>>(
+    '{"ok":1,"__proto__":{"polluted":true},"constructor":{"bad":1},"prototype":{"bad":1}}',
+    {},
+  )
+  check('prototype pollution keys stripped', !Object.prototype.hasOwnProperty.call(polluted, '__proto__'))
+  check('constructor key stripped', !Object.prototype.hasOwnProperty.call(polluted, 'constructor'))
+  check('Object.prototype remained clean', !('polluted' in ({} as Record<string, unknown>)))
+  eq('valid fields preserved by safeJsonParse', polluted.ok, 1)
+
+  // Safe ID & text sanitization
+  check('valid user id accepted', isSafeId('u_abc123-XYZ'))
+  check('storage key traversal rejected', !isSafeId('../admin:sessions'))
+  check('BiDi override stripped from filename', !sanitizeFilename('song\u202Egpj.mp3').includes('\u202E'))
+  check('path separators stripped from filename', !sanitizeFilename('../../etc/passwd').includes('/'))
+  check('control chars stripped from text', !sanitizeText('hi\x00\x07there', 50).includes('\x00'))
+
+  // Strict HTTPS URL / SSRF-in-browser protection
+  check('public https URL accepted', sanitizeHttpsUrl('https://cdn.example.com/focus.mp3') !== null)
+  check('javascript: scheme blocked', sanitizeHttpsUrl('javascript:alert(1)') === null)
+  check('data: scheme blocked', sanitizeHttpsUrl('data:audio/mp3;base64,AAA') === null)
+  check('http: cleartext blocked', sanitizeHttpsUrl('http://cdn.example.com/focus.mp3') === null)
+  check('localhost blocked', sanitizeHttpsUrl('https://localhost:8080/a.mp3') === null)
+  check('127.0.0.1 blocked', sanitizeHttpsUrl('https://127.0.0.1/a.mp3') === null)
+  check('RFC1918 192.168.x.x blocked', sanitizeHttpsUrl('https://192.168.1.1/a.mp3') === null)
+  check('RFC1918 10.x.x.x blocked', sanitizeHttpsUrl('https://10.0.0.5/a.mp3') === null)
+  check('cloud metadata 169.254.169.254 blocked', sanitizeHttpsUrl('https://169.254.169.254/latest') === null)
+  check('IPv6 loopback blocked', sanitizeHttpsUrl('https://[::1]/a.mp3') === null)
+  check('embedded credentials blocked', sanitizeHttpsUrl('https://user:pass@cdn.example.com/a.mp3') === null)
+
+  // Spotify URL spoofing blocked
+  check(
+    'spoofed host containing open.spotify.com rejected',
+    parseSpotifyLink('https://evil.com/open.spotify.com/track/abc123') === null,
+  )
+  check(
+    'http spotify link rejected',
+    parseSpotifyLink('http://open.spotify.com/track/abc123') === null,
+  )
+
+  // Audio magic bytes inspection
+  check('ID3 MP3 header accepted', detectAudioMagicBytes(new Uint8Array([0x49, 0x44, 0x33, 0x03])) === 'audio/mpeg')
+  check('OGG header accepted', detectAudioMagicBytes(new Uint8Array([0x4f, 0x67, 0x67, 0x53])) === 'audio/ogg')
+  check(
+    'WAV header accepted',
+    detectAudioMagicBytes(new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45])) === 'audio/wav',
+  )
+  check(
+    'HTML disguised as audio rejected',
+    detectAudioMagicBytes(new TextEncoder().encode('<!doctype html><script>alert(1)</script>')) === null,
+  )
+
+  // Password policy & PBKDF2 DoS cap
+  check('short password rejected', validatePasswordStrength('abc123') !== null)
+  check('common password rejected', validatePasswordStrength('password123') !== null)
+  check('oversized password rejected (PBKDF2 DoS guard)', validatePasswordStrength('a1'.repeat(100)) !== null)
+  check('strong 8+ char password accepted', validatePasswordStrength('Study99!') === null)
+  check('12+ char passphrase accepted', validatePasswordStrength('correct horse battery') === null)
+  check('legacy sha256 flagged for rehash', needsRehash('sha256:abcd'))
+  check('current PBKDF2 hash does not need rehash', !needsRehash(await hashPassword('Study99!', makeSalt())))
+
+  // Login brute-force rate limiter
+  const testEmail = 'attacker@example.com'
+  loginRateLimiter.reset(testEmail)
+  const t0 = 1_700_000_000_000
+  for (let i = 0; i < 4; i++) loginRateLimiter.recordFailure(testEmail, t0)
+  check('allowed before lockout threshold', loginRateLimiter.check(testEmail, t0).allowed === true)
+  loginRateLimiter.recordFailure(testEmail, t0)
+  const locked = loginRateLimiter.check(testEmail, t0)
+  check('locked out after 5 consecutive failures', locked.allowed === false)
+  check('unlocked after cooldown expires', loginRateLimiter.check(testEmail, t0 + 60_000).allowed === true)
+  loginRateLimiter.reset(testEmail)
+
+  // Storage tampering sanitization
+  const tamperedSettings = sanitizeSettings({
+    theme: 'evil',
+    pomodoroMin: -999,
+    ambientVolume: 99,
+    customAudioUrl: 'javascript:alert(1)',
+    subjects: 'not-an-array',
+  })
+  eq('tampered theme reset to default', tamperedSettings.theme, 'light')
+  eq('tampered pomodoroMin clamped', tamperedSettings.pomodoroMin, 1)
+  eq('tampered volume clamped', tamperedSettings.ambientVolume, 1)
+  eq('javascript customAudioUrl cleared', tamperedSettings.customAudioUrl, '')
+  check('tampered subjects restored to array', Array.isArray(tamperedSettings.subjects))
+
+  check(
+    'tampered session with invalid id rejected',
+    sanitizeSession({ id: '../bad', startedAt: 1, endedAt: 2, durationSec: 60 }) === null,
+  )
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`)

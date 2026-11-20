@@ -5,12 +5,14 @@ import { clsx } from 'clsx'
 export function Field({
   label,
   hint,
+  error,
   children,
   htmlFor,
   className,
 }: {
   label?: string
   hint?: ReactNode
+  error?: ReactNode
   children: ReactNode
   htmlFor?: string
   className?: string
@@ -23,7 +25,13 @@ export function Field({
         </label>
       ) : null}
       {children}
-      {hint ? <p className="mt-1.5 text-xs text-muted">{hint}</p> : null}
+      {error ? (
+        <p className="mt-1.5 text-xs font-medium text-red-600" role="alert">
+          {error}
+        </p>
+      ) : hint ? (
+        <p className="mt-1.5 text-xs text-muted">{hint}</p>
+      ) : null}
     </div>
   )
 }

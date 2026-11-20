@@ -19,6 +19,7 @@ import { musicEngine } from '../lib/music'
 import { getTrack } from '../lib/audio-library'
 import { completionMessage, quoteOfTheDay } from '../lib/quotes'
 import { formatDuration } from '../lib/date'
+import { LIMITS, sanitizeHttpsUrl, sanitizeText } from '../lib/security'
 
 export type TimerStatus = 'idle' | 'running' | 'paused' | 'completed'
 
@@ -159,7 +160,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   /* --------------------------- hydration --------------------------- */
 
   useEffect(() => {
-    const stored = user ? timerStorage.read<TimerSnapshot>(user.id) : null
+    const stored = user ? timerStorage.read(user.id) : null
     if (stored && stored.durationSec > 0 && stored.modeId) {
       setSnapshot({ ...stored })
     } else {
@@ -230,8 +231,9 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     }
   }, [user, settings.musicSource, settings.customAudioUrl, settings.customAudioName])
 
+  const validatedAudioUrl = sanitizeHttpsUrl(settings.customAudioUrl) ?? ''
   const customTrackSrc =
-    settings.musicSource === 'custom' ? settings.customAudioUrl || customSrc : ''
+    settings.musicSource === 'custom' ? validatedAudioUrl || customSrc : ''
 
   useEffect(() => {
     const focusRunning = snapshot.status === 'running' && snapshot.type === 'focus'
@@ -459,11 +461,19 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setSubject = useCallback((subject: string) => {
-    setSnapshot((prev) => ({ ...prev, subject, updatedAt: Date.now() }))
+    setSnapshot((prev) => ({
+      ...prev,
+      subject: sanitizeText(subject, LIMITS.subject, { trim: false }),
+      updatedAt: Date.now(),
+    }))
   }, [])
 
   const setLabel = useCallback((label: string) => {
-    setSnapshot((prev) => ({ ...prev, label, updatedAt: Date.now() }))
+    setSnapshot((prev) => ({
+      ...prev,
+      label: sanitizeText(label, LIMITS.label, { trim: false }),
+      updatedAt: Date.now(),
+    }))
   }, [])
 
   const setCustomMinutes = useCallback((minutes: number) => {

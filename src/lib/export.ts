@@ -1,12 +1,14 @@
 import type { StudySession } from '../types'
 import { formatDuration, formatTimeOfDay, toDayKey } from './date'
+import { sanitizeFilename } from './security'
 
 function download(filename: string, content: string, mime: string): void {
   const blob = new Blob([content], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = filename
+  a.download = sanitizeFilename(filename, 'export.txt')
+  a.rel = 'noopener noreferrer'
   document.body.appendChild(a)
   a.click()
   a.remove()
@@ -15,9 +17,9 @@ function download(filename: string, content: string, mime: string): void {
 
 function csvCell(value: string | number | boolean): string {
   let s = String(value)
-  // Guard against spreadsheet formula injection (user notes/subjects).
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`
+  // Guard against spreadsheet formula / DDE injection (including leading spaces or pipe).
+  if (/^[\t\r ]*[=+\-@|]/.test(s) || /^[\t\r]/.test(s)) s = `'${s}`
+  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`
   return s
 }
 
@@ -52,6 +54,14 @@ export function exportSessionsCSV(sessions: StudySession[]): void {
   download(`studystreak-history-${stamp}.csv`, sessionsToCSV(sessions), 'text/csv;charset=utf-8')
 }
 
+function stripSensitiveProfileFields(profile: unknown): unknown {
+  if (!profile || typeof profile !== 'object') return profile
+  const { passwordHash: _p, salt: _s, ...safe } = profile as Record<string, unknown>
+  void _p
+  void _s
+  return safe
+}
+
 export function exportBackupJSON(payload: {
   profile?: unknown
   sessions: StudySession[]
@@ -61,7 +71,17 @@ export function exportBackupJSON(payload: {
   const stamp = toDayKey(new Date())
   download(
     `studystreak-backup-${stamp}.json`,
-    JSON.stringify({ app: 'StudyStreak', version: 1, exportedAt: new Date().toISOString(), ...payload }, null, 2),
+    JSON.stringify(
+      {
+        app: 'StudyStreak',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        ...payload,
+        profile: stripSensitiveProfileFields(payload.profile),
+      },
+      null,
+      2,
+    ),
     'application/json;charset=utf-8',
   )
 }

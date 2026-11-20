@@ -9,9 +9,8 @@ import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { deleteTrack, putTrack } from '../../lib/audio-library'
 import { parseSpotifyLink, spotifyEmbedHeight, spotifyEmbedUrl } from '../../lib/music'
+import { LIMITS, sanitizeHttpsUrl, validateAudioFile } from '../../lib/security'
 import type { AmbientSoundId, MusicSource } from '../../types'
-
-const MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 
 export function SoundCard() {
   const { settings, update } = useSettings()
@@ -20,20 +19,21 @@ export function SoundCard() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const spotify = parseSpotifyLink(settings.spotifyUrl)
-  const hasTrack = Boolean(settings.customAudioUrl || settings.customAudioName)
+  const rawAudioUrl = settings.customAudioUrl.trim()
+  const validAudioUrl = rawAudioUrl ? sanitizeHttpsUrl(rawAudioUrl) : null
+  const audioUrlInvalid = Boolean(rawAudioUrl && !validAudioUrl)
+  const hasTrack = Boolean(validAudioUrl || settings.customAudioName)
 
   const onUpload = async (file: File | undefined) => {
     if (!file || !user) return
-    if (!file.type.startsWith('audio/')) {
-      push({ title: 'Unsupported file', description: 'Pick an audio file (mp3, ogg, wav…).', variant: 'error' })
+    const result = await validateAudioFile(file)
+    if (!result.ok) {
+      push({ title: 'Invalid audio file', description: result.error, variant: 'error' })
+      if (fileRef.current) fileRef.current.value = ''
       return
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      push({ title: 'File too large', description: 'Keep it under 40 MB.', variant: 'error' })
-      return
-    }
-    await putTrack(user.id, file)
-    update({ musicSource: 'custom', customAudioUrl: '', customAudioName: file.name })
+    await putTrack(user.id, result.blob)
+    update({ musicSource: 'custom', customAudioUrl: '', customAudioName: result.safeName })
     push({ title: 'Track ready', description: 'It loops during your focus sessions.', variant: 'success' })
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -92,9 +92,18 @@ export function SoundCard() {
 
         {settings.musicSource === 'custom' ? (
           <>
-            <Field label="Audio file URL" hint="A direct link to your own audio file (mp3, ogg, m4a…).">
+            <Field
+              label="Audio file URL"
+              hint="A direct HTTPS link to your own audio file (mp3, ogg, m4a…)."
+              error={
+                audioUrlInvalid
+                  ? 'Enter a valid public https:// URL (local network and non-HTTPS URLs are blocked).'
+                  : undefined
+              }
+            >
               <TextInput
                 type="url"
+                maxLength={LIMITS.url}
                 value={settings.customAudioUrl}
                 onChange={(e) => update({ customAudioUrl: e.target.value })}
                 placeholder="https://example.com/focus.mp3"
@@ -111,7 +120,7 @@ export function SoundCard() {
               <input
                 ref={fileRef}
                 type="file"
-                accept="audio/*"
+                accept="audio/mpeg,audio/ogg,audio/wav,audio/webm,audio/mp4,audio/aac,audio/flac,.mp3,.ogg,.wav,.m4a,.aac,.flac,.webm"
                 className="hidden"
                 onChange={(e) => void onUpload(e.target.files?.[0])}
               />
@@ -126,7 +135,7 @@ export function SoundCard() {
               {hasTrack ? (
                 <span className="chip !py-1.5 !text-ink">
                   <span className="max-w-[12rem] truncate">
-                    {settings.customAudioUrl ? 'Linked file' : settings.customAudioName}
+                    {validAudioUrl ? 'Linked file' : settings.customAudioName}
                   </span>
                   <button
                     type="button"
@@ -160,6 +169,7 @@ export function SoundCard() {
               hint="Paste a playlist, album, or track link from open.spotify.com (Share → Copy link)."
             >
               <TextInput
+                maxLength={LIMITS.url}
                 value={settings.spotifyUrl}
                 onChange={(e) => update({ spotifyUrl: e.target.value })}
                 placeholder="https://open.spotify.com/playlist/…"
@@ -173,6 +183,8 @@ export function SoundCard() {
                 width="100%"
                 height={spotifyEmbedHeight(spotify)}
                 loading="lazy"
+                referrerPolicy="no-referrer"
+                sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation"
                 allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
                 className="rounded-xl border border-line"
                 style={{ border: 0 }}

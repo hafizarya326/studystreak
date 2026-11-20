@@ -20,6 +20,7 @@ import { Button } from '../ui/Button'
 import { Segmented } from '../ui/Segmented'
 import { TextInput } from '../ui/Field'
 import { formatClock } from '../../lib/date'
+import { LIMITS } from '../../lib/security'
 
 const MODES = [
   { value: 'pomodoro' as const, label: 'Pomodoro' },
@@ -206,6 +207,7 @@ export function TimerPanel({
             list="subject-options"
             value={timer.subject}
             onChange={(e) => timer.setSubject(e.target.value)}
+            maxLength={LIMITS.subject}
             placeholder="What are you studying?"
           />
           <datalist id="subject-options">
@@ -219,6 +221,7 @@ export function TimerPanel({
           <TextInput
             value={timer.label}
             onChange={(e) => timer.setLabel(e.target.value)}
+            maxLength={LIMITS.label}
             placeholder="e.g. Chapter 4 — Thermodynamics"
           />
         </label>

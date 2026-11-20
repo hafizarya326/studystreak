@@ -16,18 +16,7 @@
       rel="stylesheet"
     />
     <title>StudyStreak — Study Timer & Daily Streaks</title>
-    <script>
-      // Apply the saved theme before first paint to avoid a light-mode flash.
-      try {
-        var t = localStorage.getItem('studystreak.v1:theme')
-        if (
-          t === 'dark' ||
-          (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-        ) {
-          document.documentElement.classList.add('dark')
-        }
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
     <style>
       html { background: #f8f7f3; }
       html.dark { background: #1a1917; }

@@ -21,6 +21,7 @@ import { Segmented } from '../components/ui/Segmented'
 import { useData } from '../context/DataContext'
 import { useToast } from '../context/ToastContext'
 import { exportSessionsCSV } from '../lib/export'
+import { LIMITS } from '../lib/security'
 import {
   addDays,
   formatDateLabel,
@@ -161,6 +162,7 @@ export function HistoryPage() {
                   <TextInput
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
+                    maxLength={LIMITS.search}
                     placeholder="Search by subject, label or note…"
                     className="pl-9"
                   />
@@ -358,6 +360,7 @@ export function HistoryPage() {
           value={noteDraft}
           onChange={(e) => setNoteDraft(e.target.value)}
           rows={5}
+          maxLength={LIMITS.note}
           placeholder="What did you cover? Any follow-ups?"
           className="input resize-none"
         />

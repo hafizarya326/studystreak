@@ -11,6 +11,7 @@ import {
 import type { UserSettings } from '../types'
 import { DEFAULT_SETTINGS } from '../lib/defaults'
 import { repository } from '../lib/repository'
+import { sanitizeSettings } from '../lib/security'
 import { useAuth } from './AuthContext'
 
 interface SettingsContextValue {
@@ -59,7 +60,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const update = useCallback(
     (patch: Partial<UserSettings>) => {
       setSettings((prev) => {
-        const next = { ...prev, ...patch }
+        const next = sanitizeSettings({ ...prev, ...patch })
         persist(next)
         return next
       })
@@ -69,8 +70,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const replace = useCallback(
     (next: UserSettings) => {
-      setSettings(next)
-      persist(next)
+      const clean = sanitizeSettings(next)
+      setSettings(clean)
+      persist(clean)
     },
     [persist],
   )

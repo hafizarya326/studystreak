@@ -8,11 +8,28 @@ import {
   type ReactNode,
 } from 'react'
 import type { UserProfile, UserRecord } from '../types'
-import { repository } from '../lib/repository'
-import { hashPassword, makeSalt, verifyPassword } from '../lib/crypto'
+import { AUTH_STORAGE_KEY, repository } from '../lib/repository'
+import {
+  dummyPasswordWork,
+  hashPassword,
+  makeSalt,
+  needsRehash,
+  verifyPassword,
+} from '../lib/crypto'
 import { uid } from '../lib/id'
+import { deleteTrack } from '../lib/audio-library'
+import { soundEngine } from '../lib/sound'
+import { musicEngine } from '../lib/music'
+import {
+  LIMITS,
+  loginRateLimiter,
+  sanitizeText,
+  validatePasswordStrength,
+} from '../lib/security'
 
 const AVATARS = ['🦉', '🐢', '🦊', '🐝', '🌱', '📚', '🚀', '🐬', '🦁', '🌙']
+const DEMO_EMAIL = 'demo@studystreak.app'
+const GENERIC_LOGIN_ERROR = 'Invalid email or password.'
 
 interface AuthContextValue {
   user: UserProfile | null
@@ -40,38 +57,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let alive = true
-    ;(async () => {
+    const syncActiveUser = async () => {
       try {
         const id = await repository.getActiveUserId()
-        if (id) {
-          const record = await repository.getUser(id)
-          if (alive && record) setUser(toProfile(record))
+        if (!id) {
+          if (alive) setUser(null)
+          return
         }
+        const record = await repository.getUser(id)
+        if (alive) setUser(record ? toProfile(record) : null)
       } finally {
         if (alive) setLoading(false)
       }
-    })()
+    }
+    void syncActiveUser()
+
+    // Keep sign-in / sign-out state synchronized across browser tabs.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === AUTH_STORAGE_KEY || e.key === null) {
+        void syncActiveUser()
+      }
+    }
+    window.addEventListener('storage', onStorage)
     return () => {
       alive = false
+      window.removeEventListener('storage', onStorage)
     }
   }, [])
 
   const register = useCallback(
     async ({ name, email, password }: { name: string; email: string; password: string }) => {
-      const cleanEmail = email.trim().toLowerCase()
-      if (!name.trim()) throw new Error('Please enter your name.')
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail))
+      const cleanName = sanitizeText(name, LIMITS.name)
+      const cleanEmail = sanitizeText(email, LIMITS.email).toLowerCase()
+
+      if (!cleanName) throw new Error('Please enter your name.')
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) {
         throw new Error('Please enter a valid email address.')
-      if (password.length < 6) throw new Error('Password must be at least 6 characters.')
+      }
+      if (cleanEmail === DEMO_EMAIL) {
+        throw new Error('This email address is reserved.')
+      }
+
+      const passwordError = validatePasswordStrength(password)
+      if (passwordError) throw new Error(passwordError)
 
       const existing = await repository.findUserByEmail(cleanEmail)
-      if (existing) throw new Error('An account with this email already exists.')
+      if (existing) throw new Error('Unable to create account with this email. Try logging in instead.')
 
       const salt = makeSalt()
       const passwordHash = await hashPassword(password, salt)
       const record: UserRecord = {
         id: uid('u_'),
-        name: name.trim(),
+        name: cleanName,
         email: cleanEmail,
         avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)],
         tagline: 'Ready to build a study habit.',
@@ -87,31 +124,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const login = useCallback(async ({ email, password }: { email: string; password: string }) => {
-    const record = await repository.findUserByEmail(email.trim().toLowerCase())
-    if (!record) throw new Error('No account found for that email.')
+    const cleanEmail = sanitizeText(email, LIMITS.email).toLowerCase()
+    const limit = loginRateLimiter.check(cleanEmail)
+    if (!limit.allowed) {
+      throw new Error(
+        `Too many failed sign-in attempts. Please wait ${limit.retryAfterSec}s before trying again.`,
+      )
+    }
+
+    // Reject oversized password inputs before invoking PBKDF2 (prevents client DoS).
+    if (!password || password.length > LIMITS.passwordMax) {
+      loginRateLimiter.recordFailure(cleanEmail)
+      throw new Error(GENERIC_LOGIN_ERROR)
+    }
+
+    const record = await repository.findUserByEmail(cleanEmail)
+    if (!record) {
+      // Equalise timing with a valid-user check to prevent account enumeration.
+      await dummyPasswordWork(password)
+      loginRateLimiter.recordFailure(cleanEmail)
+      throw new Error(GENERIC_LOGIN_ERROR)
+    }
+
     const ok = await verifyPassword(password, record.salt, record.passwordHash)
-    if (!ok) throw new Error('Incorrect password. Please try again.')
-    await repository.setActiveUserId(record.id)
-    setUser(toProfile(record))
+    if (!ok) {
+      loginRateLimiter.recordFailure(cleanEmail)
+      throw new Error(GENERIC_LOGIN_ERROR)
+    }
+
+    loginRateLimiter.reset(cleanEmail)
+
+    // Transparently upgrade legacy hashes (sha256:/h:) or lower iteration counts.
+    let activeRecord = record
+    if (needsRehash(record.passwordHash)) {
+      const nextSalt = makeSalt()
+      const nextHash = await hashPassword(password, nextSalt)
+      activeRecord = { ...record, salt: nextSalt, passwordHash: nextHash }
+      await repository.saveUser(activeRecord)
+    }
+
+    await repository.setActiveUserId(activeRecord.id)
+    setUser(toProfile(activeRecord))
   }, [])
 
   const demoLogin = useCallback(async () => {
-    const email = 'demo@studystreak.app'
-    const existing = await repository.findUserByEmail(email)
+    const existing = await repository.findUserByEmail(DEMO_EMAIL)
     if (existing) {
       await repository.setActiveUserId(existing.id)
       setUser(toProfile(existing))
       return
     }
     const salt = makeSalt()
+    // Random non-guessable credential instead of a hardcoded literal password.
+    const ephemeralSecret = makeSalt() + makeSalt()
     const record: UserRecord = {
       id: uid('u_'),
       name: 'Demo Student',
-      email,
+      email: DEMO_EMAIL,
       avatar: '🦉',
       tagline: 'Exploring StudyStreak.',
       createdAt: Date.now(),
-      passwordHash: await hashPassword('demo1234', salt),
+      passwordHash: await hashPassword(ephemeralSecret, salt),
       salt,
     }
     await repository.saveUser(record)
@@ -120,6 +193,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
+    soundEngine.stopAmbient()
+    musicEngine.stop()
     await repository.setActiveUserId(null)
     setUser(null)
   }, [])
@@ -129,7 +204,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!user) return
       const record = await repository.getUser(user.id)
       if (!record) return
-      const next: UserRecord = { ...record, ...patch, id: record.id, createdAt: record.createdAt }
+
+      // Explicitly whitelist mutable profile fields (prevents mass assignment).
+      const nextName =
+        typeof patch.name === 'string'
+          ? sanitizeText(patch.name, LIMITS.name) || record.name
+          : record.name
+      const nextAvatar =
+        typeof patch.avatar === 'string'
+          ? sanitizeText(patch.avatar, LIMITS.avatar) || record.avatar
+          : record.avatar
+      const nextTagline =
+        typeof patch.tagline === 'string'
+          ? sanitizeText(patch.tagline, LIMITS.tagline)
+          : record.tagline
+
+      const next: UserRecord = {
+        ...record,
+        name: nextName,
+        avatar: nextAvatar,
+        tagline: nextTagline,
+      }
       await repository.saveUser(next)
       setUser(toProfile(next))
     },
@@ -138,6 +233,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const deleteAccount = useCallback(async () => {
     if (!user) return
+    soundEngine.stopAmbient()
+    musicEngine.stop()
+    await deleteTrack(user.id)
     await repository.deleteUser(user.id)
     await repository.setActiveUserId(null)
     setUser(null)

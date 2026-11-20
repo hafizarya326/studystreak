@@ -29,6 +29,7 @@ import {
 } from '../lib/achievements'
 import { uid } from '../lib/id'
 import { formatDuration } from '../lib/date'
+import { LIMITS, sanitizeText } from '../lib/security'
 
 export interface NewSessionInput {
   startedAt: number
@@ -125,10 +126,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const addSession = useCallback(
     async (input: NewSessionInput): Promise<StudySession> => {
+      const cleanSubject = sanitizeText(input.subject, LIMITS.subject) || 'General'
+      const cleanLabel = sanitizeText(input.label, LIMITS.label)
+      const cleanNote = sanitizeText(input.note, LIMITS.note, { multiline: true })
       const session: StudySession = {
         id: uid('s_'),
         userId: user?.id ?? 'guest',
-        ...input,
+        startedAt: Number.isFinite(input.startedAt) ? input.startedAt : Date.now(),
+        endedAt: Number.isFinite(input.endedAt) ? input.endedAt : Date.now(),
+        durationSec: Math.min(86_400, Math.max(0, Math.round(input.durationSec))),
+        type: input.type,
+        subject: cleanSubject,
+        label: cleanLabel || undefined,
+        note: cleanNote || undefined,
+        completed: Boolean(input.completed),
+        modeId: input.modeId,
       }
       if (user) {
         await repository.saveSession(user.id, session)
@@ -144,10 +156,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateSession = useCallback(
     async (id: string, patch: Partial<StudySession>) => {
       // Resolve the merged session up front — a state updater must stay pure,
-      // so we never read a value out of it.
+      // so we never read a value out of it. Whitelist mutable fields so id/userId
+      // cannot be overwritten.
       const current = sessions.find((s) => s.id === id)
       if (!current) return
-      const next: StudySession = { ...current, ...patch }
+      const next: StudySession = {
+        ...current,
+        subject:
+          patch.subject !== undefined
+            ? sanitizeText(patch.subject, LIMITS.subject) || current.subject
+            : current.subject,
+        label:
+          patch.label !== undefined
+            ? sanitizeText(patch.label, LIMITS.label) || undefined
+            : current.label,
+        note:
+          patch.note !== undefined
+            ? sanitizeText(patch.note, LIMITS.note, { multiline: true }) || undefined
+            : current.note,
+      }
       setSessions((prev) => prev.map((s) => (s.id === id ? next : s)))
       if (user) await repository.saveSession(user.id, next)
     },

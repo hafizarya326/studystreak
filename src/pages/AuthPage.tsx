@@ -5,6 +5,7 @@ import { Button } from '../components/ui/Button'
 import { Field, TextInput } from '../components/ui/Field'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
+import { LIMITS } from '../lib/security'
 
 const FEATURES = [
   { icon: Timer, title: 'Pomodoro that persists', text: 'Refresh or switch tabs — your timer keeps perfect time.' },
@@ -146,6 +147,7 @@ export function AuthPage() {
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Alex Rivera"
                   autoComplete="name"
+                  maxLength={LIMITS.name}
                   required
                 />
               </Field>
@@ -158,17 +160,28 @@ export function AuthPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 autoComplete="email"
+                maxLength={LIMITS.email}
                 required
               />
             </Field>
-            <Field label="Password" htmlFor="password">
+            <Field
+              label="Password"
+              htmlFor="password"
+              hint={
+                mode === 'register'
+                  ? 'At least 8 characters with letters and numbers, or a 12+ character passphrase.'
+                  : undefined
+              }
+            >
               <TextInput
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === 'register' ? 'At least 6 characters' : '••••••••'}
+                placeholder={mode === 'register' ? 'At least 8 characters' : '••••••••'}
                 autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                minLength={mode === 'register' ? LIMITS.passwordMin : undefined}
+                maxLength={LIMITS.passwordMax}
                 required
               />
             </Field>
