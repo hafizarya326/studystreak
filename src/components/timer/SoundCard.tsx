@@ -274,7 +274,7 @@ export function SoundCard() {
               <div
                 ref={spotifySlotRef}
                 style={{ height: spotifyEmbedHeight(spotifyRef) }}
-                className="w-full rounded-xl border border-line/60 bg-subtle/40"
+                className="w-full overflow-hidden rounded-2xl bg-subtle/40"
                 aria-label="Spotify player container"
               />
             ) : settings.spotifyUrl.trim() ? (

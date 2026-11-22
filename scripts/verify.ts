@@ -18,6 +18,7 @@ import {
   cycleAmbient,
   parseSpotifyLink,
   spotifyCanonicalUrl,
+  spotifyEmbedHeight,
   spotifyEmbedUrl,
   spotifyFallbackTitle,
   spotifyMiniHeight,
@@ -457,6 +458,10 @@ console.log('\nNow Playing & audio queue helpers')
     'https://open.spotify.com/playlist/abc123',
   )
   eq('Spotify fallback title capitalized', spotifyFallbackTitle({ type: 'playlist', id: 'abc' }), 'Spotify Playlist')
+  eq('Spotify card embed height is 80px for single tracks', spotifyEmbedHeight({ type: 'track', id: 'abc' }), 80)
+  eq('Spotify card embed height is 152px for playlists', spotifyEmbedHeight({ type: 'playlist', id: 'abc' }), 152)
+  eq('Spotify card embed height is 152px for albums', spotifyEmbedHeight({ type: 'album', id: 'abc' }), 152)
+  eq('Spotify card embed height is 152px for shows', spotifyEmbedHeight({ type: 'show', id: 'abc' }), 152)
   eq('Spotify mini height is 80px for single tracks', spotifyMiniHeight({ type: 'track', id: 'abc' }), 80)
   eq('Spotify mini height is 80px for playlists', spotifyMiniHeight({ type: 'playlist', id: 'abc' }), 80)
   eq('Spotify mini height is 80px for albums', spotifyMiniHeight({ type: 'album', id: 'abc' }), 80)

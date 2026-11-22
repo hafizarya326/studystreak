@@ -139,13 +139,19 @@ export function spotifyCanonicalUrl(ref: SpotifyRef): string {
 
 export function spotifyEmbedUrl(ref: SpotifyRef): string {
   // Always pass `theme=0` so Spotify renders its neutral dark surface instead
-  // of a bright/white card background, blending cleanly with Focus Mode without
-  // changing `src` (which would reload the iframe) across theme or layout changes.
+  // of a bright/white card background, blending cleanly with both SoundCard and
+  // Focus Mode without changing `src` (which would reload the iframe).
   return `https://open.spotify.com/embed/${ref.type}/${encodeURIComponent(ref.id)}?utm_source=generator&theme=0`
 }
 
+/**
+ * Fixed embed height in SoundCard per Spotify content type:
+ * - 80px for single tracks
+ * - 152px for playlists, albums, shows, artists, and episodes
+ * Never uses the 352px variant, which leaves an opaque white area below Spotify's player.
+ */
 export function spotifyEmbedHeight(ref: SpotifyRef): number {
-  return ref.type === 'track' || ref.type === 'episode' ? 152 : 352
+  return ref.type === 'track' ? 80 : 152
 }
 
 /**

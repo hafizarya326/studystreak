@@ -146,10 +146,8 @@ export function SpotifyEmbedHost() {
     >
       <div
         className={clsx(
-          'h-full w-full overflow-hidden border',
-          focusMode
-            ? 'rounded-2xl border-black/10 bg-card/80 shadow-lift dark:border-white/10 dark:bg-card/60'
-            : 'rounded-xl border-line bg-card',
+          'h-full w-full overflow-hidden rounded-2xl border border-black/10 dark:border-white/10',
+          focusMode ? 'bg-card/80 shadow-lift dark:bg-card/60' : 'bg-transparent',
         )}
       >
         <iframe
