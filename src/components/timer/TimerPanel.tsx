@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  ChevronUp,
   Coffee,
   Maximize2,
   Minimize2,
@@ -10,16 +11,20 @@ import {
   Sparkles,
   Volume2,
   VolumeX,
+  X,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useTimer, MODE_LABELS } from '../../context/TimerContext'
 import { useSettings } from '../../context/SettingsContext'
+import { useAudio } from '../../context/AudioContext'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { ProgressRing } from '../ui/ProgressRing'
 import { Button } from '../ui/Button'
 import { Segmented } from '../ui/Segmented'
 import { TextInput } from '../ui/Field'
+import { NowPlayingBar } from './NowPlayingBar'
 import { formatClock } from '../../lib/date'
+import { spotifyMiniHeight } from '../../lib/music'
 import { LIMITS } from '../../lib/security'
 
 const MODES = [
@@ -40,7 +45,41 @@ export function TimerPanel({
 }) {
   const timer = useTimer()
   const { settings, update } = useSettings()
+  const {
+    nowPlaying,
+    skipNext,
+    skipPrev,
+    spotifyRef,
+    setFocusMode: setAudioFocusMode,
+    spotifyMiniCollapsed,
+    toggleSpotifyMini,
+    spotifyPlayHintDismissed,
+    dismissSpotifyPlayHint,
+    registerSpotifySlot,
+  } = useAudio()
   const [focusMode, setFocusMode] = useState(false)
+
+  const audioRef = useRef({ nowPlaying, skipNext, skipPrev })
+  useEffect(() => {
+    audioRef.current = { nowPlaying, skipNext, skipPrev }
+  })
+
+  // Keep AudioContext aware of Focus Mode so the persistent SpotifyEmbedHost
+  // repositions its single <iframe> without ever unmounting or reloading it.
+  useEffect(() => {
+    setAudioFocusMode(focusMode)
+    return () => {
+      setAudioFocusMode(false)
+      registerSpotifySlot('fullscreen', null)
+    }
+  }, [focusMode, setAudioFocusMode, registerSpotifySlot])
+
+  const spotifyFullscreenSlotRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      registerSpotifySlot('fullscreen', el)
+    },
+    [registerSpotifySlot],
+  )
 
   const isSm = useMediaQuery('(min-width: 640px)')
   const isLg = useMediaQuery('(min-width: 1024px)')
@@ -60,6 +99,42 @@ export function TimerPanel({
     document.addEventListener('fullscreenchange', onChange)
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
+
+  // Keyboard shortcuts while inside Fullscreen Focus Mode:
+  // N = Next track / ambient preset, P = Previous track, Escape = Exit focus.
+  // Kept distinct from TimerPage's Space (Start/Pause), R (Reset), and S (Skip timer).
+  useEffect(() => {
+    if (!focusMode) return
+    const isTyping = (el: EventTarget | null) => {
+      const node = el as HTMLElement | null
+      if (!node) return false
+      return (
+        node.tagName === 'INPUT' ||
+        node.tagName === 'TEXTAREA' ||
+        node.tagName === 'SELECT' ||
+        node.isContentEditable
+      )
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return
+      const { nowPlaying: np, skipNext: next, skipPrev: prev } = audioRef.current
+      if (e.key === 'n' || e.key === 'N') {
+        if (np?.canSkip) {
+          e.preventDefault()
+          next()
+        }
+      } else if (e.key === 'p' || e.key === 'P') {
+        if (np?.canPrev) {
+          e.preventDefault()
+          prev()
+        }
+      } else if (e.key === 'Escape') {
+        setFocusMode(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [focusMode])
 
   const enterFocus = () => {
     setFocusMode(true)
@@ -86,16 +161,17 @@ export function TimerPanel({
     timer.toggle()
   }
 
-  const ring = (
+  const renderRing = (inFocusMode = false) => (
     <ProgressRing
-      size={ringSize}
-      stroke={ringStroke}
+      size={inFocusMode ? 296 : ringSize}
+      displaySize={inFocusMode ? 'clamp(176px, min(72vw, 38dvh), 296px)' : undefined}
+      stroke={inFocusMode ? 11 : ringStroke}
       progress={isCompleted ? 1 : Math.max(0, Math.min(1, timer.progress))}
       gradientFrom={isFocusInterval ? 'rgb(var(--c-sage))' : 'rgb(var(--c-sage))'}
       gradientTo={isFocusInterval ? 'rgb(var(--c-sage-600))' : 'rgb(var(--c-sage-600))'}
       trackClassName="stroke-subtle"
     >
-      <div className="flex flex-col items-center">
+      <div className="flex flex-col items-center px-4">
         <span
           className={clsx(
             'mb-1 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide',
@@ -108,7 +184,13 @@ export function TimerPanel({
         <span
           className={clsx(
             'font-display font-extrabold leading-none tabular-nums text-ink',
-            compact ? 'text-4xl' : isLg ? 'text-[62px]' : 'text-[52px]',
+            inFocusMode
+              ? 'text-[clamp(2.25rem,6.5dvh,3.6rem)]'
+              : compact
+                ? 'text-4xl'
+                : isLg
+                  ? 'text-[62px]'
+                  : 'text-[52px]',
           )}
         >
           {formatClock(timer.remainingSec, { showHours: timer.durationSec >= 3600 })}
@@ -125,6 +207,8 @@ export function TimerPanel({
       </div>
     </ProgressRing>
   )
+
+  const ring = renderRing(false)
 
   const controls = (
     <div className="flex items-center justify-center gap-2.5">
@@ -268,23 +352,96 @@ export function TimerPanel({
 
       {/* Full-screen focus mode */}
       {focusMode ? (
-        <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center bg-bg px-6">
-          <button
-            type="button"
-            onClick={exitFocus}
-            className="absolute right-5 top-5 inline-flex items-center gap-2 rounded-xl border border-line bg-card px-3 py-2 text-xs font-medium text-ink transition hover:bg-subtle"
-          >
-            <Minimize2 className="h-4 w-4" />
-            Exit focus
-          </button>
-          <div className="flex flex-col items-center">
-            <span className="mb-8 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
+        <div
+          data-focus-mode="true"
+          className="fixed inset-0 z-[70] flex h-[100dvh] w-full flex-col items-center justify-between overflow-hidden bg-bg px-4 pt-5 sm:px-6"
+          style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
+        >
+          {/* Top bar: centered subject label + Exit focus button with guaranteed clearance */}
+          <div className="relative flex min-h-[2.25rem] w-full shrink-0 items-center justify-center">
+            <span className="max-w-full truncate px-24 text-xs font-semibold uppercase tracking-[0.2em] text-muted">
               {timer.subject || 'Deep focus'}
             </span>
-            {ring}
-            <div className="mt-10">{controls}</div>
-            <p className="mt-6 text-xs text-muted">Stay with it. Distractions can wait.</p>
+            <button
+              type="button"
+              onClick={exitFocus}
+              className="absolute right-0 top-1/2 inline-flex -translate-y-1/2 items-center gap-1.5 rounded-xl border border-line bg-card/95 px-3 py-2 text-xs font-medium text-ink shadow-soft backdrop-blur-md transition hover:bg-subtle"
+            >
+              <Minimize2 className="h-3.5 w-3.5" />
+              <span>Exit focus</span>
+            </button>
           </div>
+
+          {/* Center stage: responsive ring + controls */}
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 py-2">
+            {renderRing(true)}
+            <div className="shrink-0">{controls}</div>
+            <p className="shrink-0 text-center text-xs text-muted">
+              Stay with it. Distractions can wait.
+            </p>
+          </div>
+
+          {/* Bottom audio dock: consistent max-w-[420px] centered pill / 80px Spotify embed */}
+          {nowPlaying ? (
+            <div className="flex w-full shrink-0 flex-col items-center pt-2">
+              {nowPlaying.source === 'spotify' && spotifyRef ? (
+                <div className="flex w-full max-w-[420px] flex-col items-center">
+                  <div
+                    className="relative w-full transition-[height,opacity] duration-200 ease-out"
+                    style={{
+                      height: spotifyMiniCollapsed ? 40 : spotifyMiniHeight(spotifyRef),
+                    }}
+                  >
+                    {spotifyMiniCollapsed ? (
+                      <NowPlayingBar
+                        variant="floating"
+                        trailingAction={
+                          <button
+                            type="button"
+                            onClick={toggleSpotifyMini}
+                            aria-label="Expand Spotify player"
+                            aria-expanded={false}
+                            title="Expand Spotify player"
+                            className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition hover:bg-subtle hover:text-ink"
+                          >
+                            <ChevronUp className="h-4 w-4" />
+                          </button>
+                        }
+                      />
+                    ) : (
+                      <div
+                        role="region"
+                        aria-label="Spotify mini player"
+                        className="relative h-full w-full"
+                      >
+                        <div
+                          ref={spotifyFullscreenSlotRef}
+                          style={{ height: spotifyMiniHeight(spotifyRef) }}
+                          className="w-full overflow-hidden rounded-2xl bg-card/50"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {!spotifyMiniCollapsed && !spotifyPlayHintDismissed ? (
+                    <p className="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-muted/80">
+                      <span>Press play in the Spotify player</span>
+                      <button
+                        type="button"
+                        onClick={dismissSpotifyPlayHint}
+                        aria-label="Dismiss Spotify playback hint"
+                        className="rounded p-0.5 text-muted/80 transition hover:bg-subtle hover:text-ink"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <NowPlayingBar variant="floating" />
+              )}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

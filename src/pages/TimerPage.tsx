@@ -9,23 +9,32 @@ import { ProgressBar } from '../components/ui/ProgressBar'
 import { useTimer } from '../context/TimerContext'
 import { useSettings } from '../context/SettingsContext'
 import { useData } from '../context/DataContext'
+import { useAudio } from '../context/AudioContext'
 import { formatDuration } from '../lib/date'
 import { goalProgress } from '../lib/stats'
 
-const KEYBOARD_HINTS = [
+const TIMER_KEYBOARD_HINTS = [
   { keys: 'Space', label: 'Start / Pause' },
   { keys: 'R', label: 'Reset' },
-  { keys: 'S', label: 'Skip session' },
+  { keys: 'S', label: 'Skip timer' },
+]
+
+const TRACK_KEYBOARD_HINTS = [
+  { keys: 'N', label: 'Next track' },
+  { keys: 'P', label: 'Prev track' },
 ]
 
 export function TimerPage() {
   const timer = useTimer()
   const { settings } = useSettings()
   const { stats, today } = useData()
+  const audio = useAudio()
 
   const timerRef = useRef(timer)
+  const audioRef = useRef(audio)
   useEffect(() => {
     timerRef.current = timer
+    audioRef.current = audio
   })
 
   useEffect(() => {
@@ -40,7 +49,7 @@ export function TimerPage() {
       )
     }
     const onKey = (e: KeyboardEvent) => {
-      if (isTyping(e.target)) return
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return
       if (e.code === 'Space') {
         e.preventDefault()
         timerRef.current.toggle()
@@ -48,6 +57,19 @@ export function TimerPage() {
         timerRef.current.reset()
       } else if (e.key === 's' || e.key === 'S') {
         timerRef.current.skip()
+      } else if (e.key === 'n' || e.key === 'N') {
+        // Focus Mode handles N/P directly to avoid firing twice.
+        if (document.querySelector('[data-focus-mode="true"]')) return
+        if (audioRef.current.nowPlaying?.canSkip) {
+          e.preventDefault()
+          audioRef.current.skipNext()
+        }
+      } else if (e.key === 'p' || e.key === 'P') {
+        if (document.querySelector('[data-focus-mode="true"]')) return
+        if (audioRef.current.nowPlaying?.canPrev) {
+          e.preventDefault()
+          audioRef.current.skipPrev()
+        }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -56,6 +78,11 @@ export function TimerPage() {
 
   const dailyGoal = goalProgress(stats.todaySec, settings.dailyGoalMin * 60)
   const sessionsToday = stats.sessionsByDay[today] ?? 0
+  // Hide track-skipping shortcuts when Spotify is selected (iframe cannot be skipped via JS).
+  const keyboardHints =
+    settings.musicSource === 'spotify'
+      ? TIMER_KEYBOARD_HINTS
+      : [...TIMER_KEYBOARD_HINTS, ...TRACK_KEYBOARD_HINTS]
 
   return (
     <div>
@@ -143,7 +170,7 @@ export function TimerPage() {
             <div className="mt-4 border-t border-line pt-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Keyboard</p>
               <div className="flex flex-wrap gap-2">
-                {KEYBOARD_HINTS.map((k) => (
+                {keyboardHints.map((k) => (
                   <span key={k.keys} className="chip">
                     <kbd className="rounded bg-card px-1.5 py-0.5 font-mono text-[10px] font-semibold text-ink">
                       {k.keys}

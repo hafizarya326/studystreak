@@ -13,6 +13,7 @@ import { AuthProvider } from '../src/context/AuthContext'
 import { SettingsProvider } from '../src/context/SettingsContext'
 import { DataProvider } from '../src/context/DataContext'
 import { TimerProvider } from '../src/context/TimerContext'
+import { AudioProvider } from '../src/context/AudioContext'
 import { repository, timerStorage } from '../src/lib/repository'
 import { hashPassword, makeSalt } from '../src/lib/crypto'
 import type { StudySession } from '../src/types'
@@ -40,7 +41,9 @@ function Providers({ children }: { children: React.ReactNode }) {
       <AuthProvider>
         <SettingsProvider>
           <DataProvider>
-            <TimerProvider>{children}</TimerProvider>
+            <TimerProvider>
+              <AudioProvider>{children}</AudioProvider>
+            </TimerProvider>
           </DataProvider>
         </SettingsProvider>
       </AuthProvider>

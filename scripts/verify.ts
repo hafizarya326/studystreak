@@ -13,7 +13,18 @@ import {
   detectPerfectWeek,
   evaluateAchievements,
 } from '../src/lib/achievements'
-import { parseSpotifyLink, spotifyEmbedUrl } from '../src/lib/music'
+import {
+  ambientTitle,
+  cycleAmbient,
+  parseSpotifyLink,
+  spotifyCanonicalUrl,
+  spotifyEmbedUrl,
+  spotifyFallbackTitle,
+  spotifyMiniHeight,
+  titleFromAudioUrl,
+  titleFromFilename,
+  wrapIndex,
+} from '../src/lib/music'
 import { hashPassword, makeSalt, needsRehash, verifyPassword } from '../src/lib/crypto'
 import { sessionsToCSV } from '../src/lib/export'
 import {
@@ -400,6 +411,87 @@ console.log('\nSecurity hardening')
     'tampered session with invalid id rejected',
     sanitizeSession({ id: '../bad', startedAt: 1, endedAt: 2, durationSec: 60 }) === null,
   )
+}
+
+console.log('\nNow Playing & audio queue helpers')
+{
+  // Circular index wrapping
+  eq('empty queue returns -1', wrapIndex(0, 0, 1), -1)
+  eq('single-track queue stays at 0 on next', wrapIndex(0, 1, 1), 0)
+  eq('single-track queue stays at 0 on prev', wrapIndex(0, 1, -1), 0)
+  eq('next advances within queue', wrapIndex(0, 3, 1), 1)
+  eq('next wraps from last to first', wrapIndex(2, 3, 1), 0)
+  eq('prev wraps from first to last', wrapIndex(0, 3, -1), 2)
+  eq('prev moves backward in queue', wrapIndex(2, 3, -1), 1)
+
+  // Ambient preset cycling & labels
+  eq('ambient none returns null title', ambientTitle('none'), null)
+  eq('ambient brown returns Brown noise', ambientTitle('brown'), 'Brown noise')
+  eq('ambient cycles forward brown -> white', cycleAmbient('brown', 1), 'white')
+  eq('ambient wraps forward cafe -> brown', cycleAmbient('cafe', 1), 'brown')
+  eq('ambient wraps backward brown -> cafe', cycleAmbient('brown', -1), 'cafe')
+  eq('ambient cycling from none starts at brown', cycleAmbient('none', 1), 'brown')
+
+  // Filename & URL title extraction
+  eq('strips mp3 extension', titleFromFilename('Lofi Study Beats.mp3'), 'Lofi Study Beats')
+  eq('preserves dots inside track name', titleFromFilename('01.rain.ambient.flac'), '01.rain.ambient')
+  eq('strips directory prefix', titleFromFilename('music/chill/waves.ogg'), 'waves')
+  eq('keeps extensionless filename', titleFromFilename('Rainforest'), 'Rainforest')
+  eq('empty filename falls back cleanly', titleFromFilename('   '), 'Untitled track')
+  eq(
+    'extracts decoded title from HTTPS audio URL',
+    titleFromAudioUrl('https://cdn.example.com/audio/Deep%20Focus%20Mix.mp3?token=1'),
+    'Deep Focus Mix',
+  )
+  eq(
+    'falls back to hostname when URL has no filename',
+    titleFromAudioUrl('https://stream.example.com/'),
+    'stream.example.com',
+  )
+  eq('invalid URL falls back cleanly', titleFromAudioUrl('javascript:alert(1)'), 'Audio stream')
+
+  // Spotify metadata & mini-player height helpers
+  eq(
+    'canonical Spotify URL built cleanly',
+    spotifyCanonicalUrl({ type: 'playlist', id: 'abc123' }),
+    'https://open.spotify.com/playlist/abc123',
+  )
+  eq('Spotify fallback title capitalized', spotifyFallbackTitle({ type: 'playlist', id: 'abc' }), 'Spotify Playlist')
+  eq('Spotify mini height is 80px for single tracks', spotifyMiniHeight({ type: 'track', id: 'abc' }), 80)
+  eq('Spotify mini height is 80px for playlists', spotifyMiniHeight({ type: 'playlist', id: 'abc' }), 80)
+  eq('Spotify mini height is 80px for albums', spotifyMiniHeight({ type: 'album', id: 'abc' }), 80)
+  eq('Spotify mini height is 80px for shows', spotifyMiniHeight({ type: 'show', id: 'abc' }), 80)
+
+  // Spotify mini-player preferences persist & sanitize cleanly
+  const spotifyPrefs = sanitizeSettings({
+    spotifyMiniCollapsed: true,
+    spotifyPlayHintDismissed: true,
+  })
+  eq('spotifyMiniCollapsed persisted as boolean', spotifyPrefs.spotifyMiniCollapsed, true)
+  eq('spotifyPlayHintDismissed persisted as boolean', spotifyPrefs.spotifyPlayHintDismissed, true)
+  const invalidSpotifyPrefs = sanitizeSettings({
+    spotifyMiniCollapsed: 'yes',
+    spotifyPlayHintDismissed: 1,
+  })
+  eq('invalid spotifyMiniCollapsed defaults to false', invalidSpotifyPrefs.spotifyMiniCollapsed, false)
+  eq('invalid spotifyPlayHintDismissed defaults to false', invalidSpotifyPrefs.spotifyPlayHintDismissed, false)
+
+  // Queue persistence & legacy migration in sanitizeSettings
+  const migratedFile = sanitizeSettings({ customAudioName: 'rain_night.mp3' })
+  eq('legacy uploaded file migrated to queue', migratedFile.customAudioQueue.length, 1)
+  eq('legacy uploaded file title stripped of extension', migratedFile.customAudioQueue[0]?.title, 'rain_night')
+  eq('legacy uploaded file keeps legacy id', migratedFile.customAudioQueue[0]?.id, 'legacy')
+
+  const sanitizedQueue = sanitizeSettings({
+    customAudioQueue: [
+      { id: 't_1', kind: 'file', title: 'Track One' },
+      { id: 't_bad', kind: 'url', title: 'Bad', url: 'http://localhost/evil.mp3' },
+      { id: 't_2', kind: 'url', title: 'Track Two', url: 'https://cdn.example.com/two.mp3' },
+    ],
+    customAudioIndex: 99,
+  })
+  eq('invalid URL track stripped from persisted queue', sanitizedQueue.customAudioQueue.length, 2)
+  eq('out-of-bounds customAudioIndex clamped to last track', sanitizedQueue.customAudioIndex, 1)
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`)

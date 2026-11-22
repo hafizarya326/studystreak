@@ -1,46 +1,67 @@
-import { useRef } from 'react'
-import { Music, Upload, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link2, Music, Plus, Trash2, Upload, X } from 'lucide-react'
+import { clsx } from 'clsx'
 import { Card, CardHeader } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { Field, Select, TextInput } from '../ui/Field'
 import { Segmented } from '../ui/Segmented'
+import { NowPlayingBar } from './NowPlayingBar'
 import { useSettings } from '../../context/SettingsContext'
-import { useAuth } from '../../context/AuthContext'
-import { useToast } from '../../context/ToastContext'
-import { deleteTrack, putTrack } from '../../lib/audio-library'
-import { parseSpotifyLink, spotifyEmbedHeight, spotifyEmbedUrl } from '../../lib/music'
-import { LIMITS, sanitizeHttpsUrl, validateAudioFile } from '../../lib/security'
+import { useAudio } from '../../context/AudioContext'
+import { AMBIENT_PRESETS, spotifyEmbedHeight } from '../../lib/music'
+import { LIMITS, sanitizeHttpsUrl } from '../../lib/security'
 import type { AmbientSoundId, MusicSource } from '../../types'
 
 export function SoundCard() {
   const { settings, update } = useSettings()
-  const { user } = useAuth()
-  const { push } = useToast()
+  const {
+    nowPlaying,
+    queue,
+    currentIndex,
+    audioError,
+    selectTrack,
+    addFileTracks,
+    addUrlTrack,
+    removeTrack,
+    clearQueue,
+    spotifyRef,
+    registerSpotifySlot,
+  } = useAudio()
   const fileRef = useRef<HTMLInputElement>(null)
+  const [urlDraft, setUrlDraft] = useState('')
+  const [urlError, setUrlError] = useState<string | undefined>(undefined)
 
-  const spotify = parseSpotifyLink(settings.spotifyUrl)
-  const rawAudioUrl = settings.customAudioUrl.trim()
-  const validAudioUrl = rawAudioUrl ? sanitizeHttpsUrl(rawAudioUrl) : null
-  const audioUrlInvalid = Boolean(rawAudioUrl && !validAudioUrl)
-  const hasTrack = Boolean(validAudioUrl || settings.customAudioName)
+  const spotifySlotRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      registerSpotifySlot('card', el)
+    },
+    [registerSpotifySlot],
+  )
 
-  const onUpload = async (file: File | undefined) => {
-    if (!file || !user) return
-    const result = await validateAudioFile(file)
-    if (!result.ok) {
-      push({ title: 'Invalid audio file', description: result.error, variant: 'error' })
-      if (fileRef.current) fileRef.current.value = ''
-      return
-    }
-    await putTrack(user.id, result.blob)
-    update({ musicSource: 'custom', customAudioUrl: '', customAudioName: result.safeName })
-    push({ title: 'Track ready', description: 'It loops during your focus sessions.', variant: 'success' })
+  useEffect(() => {
+    return () => registerSpotifySlot('card', null)
+  }, [registerSpotifySlot])
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    await addFileTracks(files)
     if (fileRef.current) fileRef.current.value = ''
   }
 
-  const clearTrack = async () => {
-    if (user) await deleteTrack(user.id)
-    update({ customAudioName: '', customAudioUrl: '' })
+  const handleAddUrl = () => {
+    const trimmed = urlDraft.trim()
+    if (!trimmed) return
+    if (!sanitizeHttpsUrl(trimmed)) {
+      setUrlError(
+        'Enter a valid public https:// URL (local network and non-HTTPS URLs are blocked).',
+      )
+      return
+    }
+    const ok = addUrlTrack(trimmed)
+    if (ok) {
+      setUrlDraft('')
+      setUrlError(undefined)
+    }
   }
 
   return (
@@ -64,6 +85,12 @@ export function SoundCard() {
         />
       </div>
 
+      {nowPlaying ? (
+        <div className="mt-4">
+          <NowPlayingBar variant="inline" />
+        </div>
+      ) : null}
+
       <div className="mt-4 space-y-4">
         {settings.musicSource === 'ambient' ? (
           <>
@@ -73,10 +100,11 @@ export function SoundCard() {
                 onChange={(e) => update({ ambient: e.target.value as AmbientSoundId })}
               >
                 <option value="none">None</option>
-                <option value="brown">Brown noise (warm)</option>
-                <option value="white">White noise (crisp)</option>
-                <option value="waves">Ocean waves</option>
-                <option value="cafe">Soft café hum</option>
+                {AMBIENT_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
               </Select>
             </Field>
             <VolumeSlider
@@ -93,21 +121,38 @@ export function SoundCard() {
         {settings.musicSource === 'custom' ? (
           <>
             <Field
-              label="Audio file URL"
-              hint="A direct HTTPS link to your own audio file (mp3, ogg, m4a…)."
-              error={
-                audioUrlInvalid
-                  ? 'Enter a valid public https:// URL (local network and non-HTTPS URLs are blocked).'
-                  : undefined
-              }
+              label="Add audio URL"
+              hint="A direct HTTPS link to an audio file (mp3, ogg, m4a…)."
+              error={urlError}
             >
-              <TextInput
-                type="url"
-                maxLength={LIMITS.url}
-                value={settings.customAudioUrl}
-                onChange={(e) => update({ customAudioUrl: e.target.value })}
-                placeholder="https://example.com/focus.mp3"
-              />
+              <div className="flex gap-2">
+                <TextInput
+                  type="url"
+                  maxLength={LIMITS.url}
+                  value={urlDraft}
+                  onChange={(e) => {
+                    setUrlDraft(e.target.value)
+                    if (urlError) setUrlError(undefined)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleAddUrl()
+                    }
+                  }}
+                  placeholder="https://example.com/focus.mp3"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddUrl}
+                  leftIcon={<Plus className="h-3.5 w-3.5" />}
+                  aria-label="Add audio URL to queue"
+                >
+                  Add
+                </Button>
+              </div>
             </Field>
 
             <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-wide text-muted">
@@ -116,13 +161,14 @@ export function SoundCard() {
               <span className="h-px flex-1 bg-line" />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <input
                 ref={fileRef}
                 type="file"
+                multiple
                 accept="audio/mpeg,audio/ogg,audio/wav,audio/webm,audio/mp4,audio/aac,audio/flac,.mp3,.ogg,.wav,.m4a,.aac,.flac,.webm"
                 className="hidden"
-                onChange={(e) => void onUpload(e.target.files?.[0])}
+                onChange={(e) => void handleFiles(e.target.files)}
               />
               <Button
                 variant="outline"
@@ -130,34 +176,82 @@ export function SoundCard() {
                 leftIcon={<Upload className="h-4 w-4" />}
                 onClick={() => fileRef.current?.click()}
               >
-                Upload a file
+                Upload audio
               </Button>
-              {hasTrack ? (
-                <span className="chip !py-1.5 !text-ink">
-                  <span className="max-w-[12rem] truncate">
-                    {validAudioUrl ? 'Linked file' : settings.customAudioName}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void clearTrack()}
-                    className="ml-0.5 rounded-full p-0.5 text-muted transition hover:bg-card hover:text-ink"
-                    aria-label="Remove track"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
+              {queue.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void clearQueue()}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-muted transition hover:text-red-600"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Clear queue
+                </button>
               ) : (
-                <span className="text-[11px] text-muted">No track yet</span>
+                <span className="text-[11px] text-muted">No tracks yet</span>
               )}
             </div>
+
+            {queue.length > 0 ? (
+              <ul
+                aria-label="Audio queue"
+                className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-line bg-subtle/40 p-1.5"
+              >
+                {queue.map((track, idx) => {
+                  const isActive = idx === currentIndex
+                  return (
+                    <li
+                      key={track.id}
+                      className={clsx(
+                        'flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs transition',
+                        isActive
+                          ? 'bg-card font-semibold text-ink shadow-soft'
+                          : 'text-muted hover:bg-card/60 hover:text-ink',
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => selectTrack(idx)}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        aria-current={isActive ? 'true' : undefined}
+                      >
+                        <span className="shrink-0 text-sage-700" aria-hidden>
+                          {track.kind === 'url' ? (
+                            <Link2 className="h-3.5 w-3.5" />
+                          ) : (
+                            <Music className="h-3.5 w-3.5" />
+                          )}
+                        </span>
+                        <span className="truncate">{track.title}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void removeTrack(track.id)}
+                        className="shrink-0 rounded-md p-1 text-muted transition hover:bg-subtle hover:text-ink"
+                        aria-label={`Remove ${track.title}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : null}
+
+            {audioError ? (
+              <p className="text-[11px] font-medium text-red-600" role="alert">
+                {audioError}
+              </p>
+            ) : null}
 
             <VolumeSlider
               value={settings.ambientVolume}
               onChange={(v) => update({ ambientVolume: v })}
             />
             <p className="text-[11px] leading-relaxed text-muted">
-              Plays automatically while a focus session runs and pauses when you stop — unlike a
-              Spotify embed, this stays in sync with your timer.
+              Plays automatically while a focus session runs and advances through your queue —
+              press <kbd className="rounded bg-subtle px-1 font-mono text-[10px]">N</kbd> to skip
+              tracks.
             </p>
           </>
         ) : null}
@@ -176,18 +270,12 @@ export function SoundCard() {
               />
             </Field>
 
-            {spotify ? (
-              <iframe
-                title="Spotify player"
-                src={spotifyEmbedUrl(spotify)}
-                width="100%"
-                height={spotifyEmbedHeight(spotify)}
-                loading="lazy"
-                referrerPolicy="no-referrer"
-                sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation"
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                className="rounded-xl border border-line"
-                style={{ border: 0 }}
+            {spotifyRef ? (
+              <div
+                ref={spotifySlotRef}
+                style={{ height: spotifyEmbedHeight(spotifyRef) }}
+                className="w-full rounded-xl border border-line/60 bg-subtle/40"
+                aria-label="Spotify player container"
               />
             ) : settings.spotifyUrl.trim() ? (
               <p className="text-[11px] text-coral-600">
@@ -196,8 +284,8 @@ export function SoundCard() {
             ) : null}
 
             <p className="text-[11px] leading-relaxed text-muted">
-              Spotify plays through their own player — press play inside it. We can’t start, pause
-              or mute it from the timer (that needs Spotify Premium + login).
+              Spotify plays through their own player — press play inside it. Entering Focus Mode
+              moves this same player into a compact mini bar without restarting your music.
             </p>
           </>
         ) : null}

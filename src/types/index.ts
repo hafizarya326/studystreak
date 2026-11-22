@@ -33,6 +33,31 @@ export type AmbientSoundId = 'none' | 'brown' | 'white' | 'waves' | 'cafe'
 /** Which background-audio source plays during a focus session. */
 export type MusicSource = 'ambient' | 'custom' | 'spotify'
 
+/** A single item in the user's custom "My audio" queue. */
+export interface AudioTrackItem {
+  id: string
+  kind: 'file' | 'url'
+  /** User-friendly display title (extension stripped for files, filename/host for URLs). */
+  title: string
+  /** Validated HTTPS URL when `kind === 'url'`. Uploaded file blobs live in IndexedDB. */
+  url?: string
+}
+
+export type NowPlayingSource = 'ambient' | 'my-audio' | 'spotify'
+
+export interface NowPlaying {
+  title: string
+  source: NowPlayingSource
+  canSkip: boolean
+  canPrev: boolean
+  /** Optional 1-based queue indicator (e.g. "2 / 4") when playing a multi-track queue. */
+  positionLabel?: string
+  /** True while the active audio source is currently playing. */
+  isPlaying: boolean
+  /** Error message when the active custom track failed to load. */
+  error?: string
+}
+
 export interface UserSettings {
   theme: ThemePreference
   soundEnabled: boolean
@@ -43,12 +68,20 @@ export interface UserSettings {
   /** Shared background-audio volume (ambient noise and custom audio). */
   ambientVolume: number
   musicSource: MusicSource
-  /** Direct link to an audio file the user owns (mp3/ogg/…). */
+  /** Legacy direct link to an audio file (migrated automatically into `customAudioQueue`). */
   customAudioUrl: string
-  /** Display name of an uploaded track (the file itself lives in IndexedDB). */
+  /** Legacy display name of an uploaded track (migrated automatically into `customAudioQueue`). */
   customAudioName: string
+  /** Ordered playlist queue for "My audio" (uploaded files and HTTPS URLs). */
+  customAudioQueue: AudioTrackItem[]
+  /** Zero-based index of the active/last-played track in `customAudioQueue`. */
+  customAudioIndex: number
   /** Spotify playlist/track/album link to embed (playback stays manual). */
   spotifyUrl: string
+  /** Whether the Spotify mini player in Fullscreen Focus Mode is collapsed to a pill. */
+  spotifyMiniCollapsed: boolean
+  /** Whether the one-time "Press play in the Spotify player" hint has been dismissed. */
+  spotifyPlayHintDismissed: boolean
 
   autoStartBreaks: boolean
   autoStartFocus: boolean

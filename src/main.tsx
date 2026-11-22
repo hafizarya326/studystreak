@@ -7,6 +7,7 @@ import { AuthProvider } from './context/AuthContext'
 import { SettingsProvider } from './context/SettingsContext'
 import { DataProvider } from './context/DataContext'
 import { TimerProvider } from './context/TimerContext'
+import { AudioProvider } from './context/AudioContext'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -15,7 +16,9 @@ createRoot(document.getElementById('root')!).render(
         <SettingsProvider>
           <DataProvider>
             <TimerProvider>
-              <App />
+              <AudioProvider>
+                <App />
+              </AudioProvider>
             </TimerProvider>
           </DataProvider>
         </SettingsProvider>

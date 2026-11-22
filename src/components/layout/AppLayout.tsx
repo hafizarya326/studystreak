@@ -5,6 +5,7 @@ import { Topbar } from './Topbar'
 import { BottomNav } from './BottomNav'
 import { MobileDrawer } from './MobileDrawer'
 import { CompletionModal } from '../timer/CompletionModal'
+import { SpotifyEmbedHost } from '../timer/SpotifyEmbedHost'
 
 export function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -34,6 +35,7 @@ export function AppLayout() {
 
       <BottomNav />
       <CompletionModal />
+      <SpotifyEmbedHost />
     </div>
   )
 }

@@ -21,7 +21,11 @@ export const DEFAULT_SETTINGS: UserSettings = {
   musicSource: 'ambient',
   customAudioUrl: '',
   customAudioName: '',
+  customAudioQueue: [],
+  customAudioIndex: 0,
   spotifyUrl: '',
+  spotifyMiniCollapsed: false,
+  spotifyPlayHintDismissed: false,
 
   autoStartBreaks: false,
   autoStartFocus: false,

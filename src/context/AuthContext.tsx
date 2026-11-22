@@ -17,7 +17,7 @@ import {
   verifyPassword,
 } from '../lib/crypto'
 import { uid } from '../lib/id'
-import { deleteTrack } from '../lib/audio-library'
+import { deleteUserTracks } from '../lib/audio-library'
 import { soundEngine } from '../lib/sound'
 import { musicEngine } from '../lib/music'
 import {
@@ -235,7 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return
     soundEngine.stopAmbient()
     musicEngine.stop()
-    await deleteTrack(user.id)
+    await deleteUserTracks(user.id)
     await repository.deleteUser(user.id)
     await repository.setActiveUserId(null)
     setUser(null)

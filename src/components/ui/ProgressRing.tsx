@@ -4,6 +4,7 @@ import { clsx } from 'clsx'
 /** SVG circular progress ring used by the timer and the consistency metric. */
 export function ProgressRing({
   size = 240,
+  displaySize,
   stroke = 10,
   progress,
   trackClassName = 'stroke-subtle',
@@ -14,6 +15,8 @@ export function ProgressRing({
   rounded = true,
 }: {
   size?: number
+  /** Optional responsive CSS length (e.g. `clamp(176px, 38dvh, 296px)`) for viewport-aware scaling. */
+  displaySize?: string
   stroke?: number
   /** 0 → 1 */
   progress: number
@@ -32,8 +35,16 @@ export function ProgressRing({
   const useGradient = Boolean(gradientTo)
 
   return (
-    <div className={clsx('relative inline-flex items-center justify-center', className)}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+    <div
+      className={clsx('relative inline-flex items-center justify-center', className)}
+      style={displaySize ? { width: displaySize, height: displaySize } : undefined}
+    >
+      <svg
+        width={displaySize ? '100%' : size}
+        height={displaySize ? '100%' : size}
+        viewBox={`0 0 ${size} ${size}`}
+        className="-rotate-90"
+      >
         <defs>
           {useGradient ? (
             <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">

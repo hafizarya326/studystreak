@@ -11,6 +11,7 @@
 import type {
   AchievementState,
   AmbientSoundId,
+  AudioTrackItem,
   MusicSource,
   SessionType,
   StudySession,
@@ -35,6 +36,8 @@ export const LIMITS = {
   search: 120,
   url: 2048,
   filename: 120,
+  trackTitle: 120,
+  audioQueueMax: 50,
   audioUploadBytes: 40 * 1024 * 1024,
   maxSessions: 50_000,
 } as const
@@ -544,6 +547,56 @@ export function sanitizeSettings(raw: unknown): UserSettings {
   const rawSpotifyUrl = sanitizeText(s.spotifyUrl, LIMITS.url)
   const safeSpotifyUrl = /^(javascript|data|vbscript|file):/i.test(rawSpotifyUrl) ? '' : rawSpotifyUrl
 
+  const safeCustomAudioName = sanitizeFilename(
+    typeof s.customAudioName === 'string' ? s.customAudioName : '',
+    '',
+  )
+
+  const customAudioQueue: AudioTrackItem[] = []
+  const seenTrackIds = new Set<string>()
+  if (Array.isArray(s.customAudioQueue)) {
+    for (const entry of s.customAudioQueue) {
+      if (customAudioQueue.length >= LIMITS.audioQueueMax) break
+      if (!entry || typeof entry !== 'object') continue
+      const item = entry as Record<string, unknown>
+      if (!isSafeId(item.id) || seenTrackIds.has(item.id)) continue
+      const kind = item.kind === 'file' || item.kind === 'url' ? item.kind : null
+      if (!kind) continue
+      const title = sanitizeText(item.title, LIMITS.trackTitle) || 'Untitled track'
+      if (kind === 'url') {
+        const cleanUrl = sanitizeHttpsUrl(item.url)
+        if (!cleanUrl) continue
+        seenTrackIds.add(item.id)
+        customAudioQueue.push({ id: item.id, kind: 'url', title, url: cleanUrl })
+      } else {
+        seenTrackIds.add(item.id)
+        customAudioQueue.push({ id: item.id, kind: 'file', title })
+      }
+    }
+  } else if (customAudioQueue.length === 0) {
+    // Transparent migration for pre-queue settings (legacy single URL or uploaded file).
+    const legacyUrl = sanitizeHttpsUrl(safeAudioUrl)
+    if (legacyUrl) {
+      customAudioQueue.push({
+        id: 'legacy_url',
+        kind: 'url',
+        title: sanitizeText(safeCustomAudioName, LIMITS.trackTitle) || 'Linked audio',
+        url: legacyUrl,
+      })
+    } else if (safeCustomAudioName) {
+      const stripped = safeCustomAudioName.replace(/\.[^.\s]{1,8}$/, '').trim()
+      customAudioQueue.push({
+        id: 'legacy',
+        kind: 'file',
+        title: sanitizeText(stripped || safeCustomAudioName, LIMITS.trackTitle),
+      })
+    }
+  }
+
+  const maxQueueIndex = Math.max(0, customAudioQueue.length - 1)
+  const customAudioIndex =
+    customAudioQueue.length > 0 ? clampInt(s.customAudioIndex, 0, maxQueueIndex, 0) : 0
+
   return {
     theme,
     soundEnabled: asBool(s.soundEnabled, d.soundEnabled),
@@ -554,8 +607,12 @@ export function sanitizeSettings(raw: unknown): UserSettings {
     ambientVolume: clampNum(s.ambientVolume, 0, 1, d.ambientVolume),
     musicSource,
     customAudioUrl: safeAudioUrl,
-    customAudioName: sanitizeFilename(typeof s.customAudioName === 'string' ? s.customAudioName : '', ''),
+    customAudioName: safeCustomAudioName,
+    customAudioQueue,
+    customAudioIndex,
     spotifyUrl: safeSpotifyUrl,
+    spotifyMiniCollapsed: asBool(s.spotifyMiniCollapsed, d.spotifyMiniCollapsed),
+    spotifyPlayHintDismissed: asBool(s.spotifyPlayHintDismissed, d.spotifyPlayHintDismissed),
 
     autoStartBreaks: asBool(s.autoStartBreaks, d.autoStartBreaks),
     autoStartFocus: asBool(s.autoStartFocus, d.autoStartFocus),

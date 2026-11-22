@@ -145,6 +145,18 @@
     animation: shimmer 1.5s infinite;
   }
 
+  .now-playing-marquee {
+    transform: translateX(0);
+    will-change: transform;
+  }
+
+  .group:hover .now-playing-marquee[data-overflow='true'],
+  .group:focus-within .now-playing-marquee[data-overflow='true'] {
+    text-overflow: clip;
+    overflow: visible;
+    animation: now-playing-marquee var(--marquee-duration, 6s) ease-in-out infinite alternate;
+  }
+
   /* Respect reduced motion globally */
   @media (prefers-reduced-motion: reduce) {
     *,
@@ -161,4 +173,15 @@
 /* Recharts tooltips should inherit theme tokens */
 .recharts-default-tooltip {
   border-radius: 12px !important;
+}
+
+@keyframes now-playing-marquee {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  85%,
+  100% {
+    transform: translateX(var(--marquee-shift, 0px));
+  }
 }

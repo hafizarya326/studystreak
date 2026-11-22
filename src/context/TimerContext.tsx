@@ -16,10 +16,9 @@ import { useToast } from './ToastContext'
 import { timerStorage } from '../lib/repository'
 import { soundEngine } from '../lib/sound'
 import { musicEngine } from '../lib/music'
-import { getTrack } from '../lib/audio-library'
 import { completionMessage, quoteOfTheDay } from '../lib/quotes'
 import { formatDuration } from '../lib/date'
-import { LIMITS, sanitizeHttpsUrl, sanitizeText } from '../lib/security'
+import { LIMITS, sanitizeText } from '../lib/security'
 
 export type TimerStatus = 'idle' | 'running' | 'paused' | 'completed'
 
@@ -206,56 +205,6 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     }
     return Math.max(0, snapshot.remainingSec)
   }, [snapshot.status, snapshot.endAt, snapshot.remainingSec, now])
-
-  /* --------------------------- ambient / custom audio --------------------------- */
-
-  // Resolve the custom track source: an explicit URL wins, otherwise the
-  // uploaded blob from IndexedDB (turned into a temporary object URL).
-  const [customSrc, setCustomSrc] = useState('')
-  useEffect(() => {
-    let alive = true
-    let objectUrl = ''
-    if (!user || settings.musicSource !== 'custom' || settings.customAudioUrl) {
-      setCustomSrc('')
-      return
-    }
-    void (async () => {
-      const blob = await getTrack(user.id)
-      if (!alive || !blob) return
-      objectUrl = URL.createObjectURL(blob)
-      setCustomSrc(objectUrl)
-    })()
-    return () => {
-      alive = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [user, settings.musicSource, settings.customAudioUrl, settings.customAudioName])
-
-  const validatedAudioUrl = sanitizeHttpsUrl(settings.customAudioUrl) ?? ''
-  const customTrackSrc =
-    settings.musicSource === 'custom' ? validatedAudioUrl || customSrc : ''
-
-  useEffect(() => {
-    const focusRunning = snapshot.status === 'running' && snapshot.type === 'focus'
-
-    const ambientShouldPlay =
-      focusRunning && settings.musicSource === 'ambient' && settings.ambient !== 'none'
-    if (ambientShouldPlay) soundEngine.startAmbient(settings.ambient, settings.ambientVolume)
-    else soundEngine.stopAmbient()
-
-    const customShouldPlay = focusRunning && settings.musicSource === 'custom' && !!customTrackSrc
-    if (customShouldPlay) musicEngine.play(customTrackSrc, settings.ambientVolume)
-    else musicEngine.stop()
-
-    // Intentionally keyed on start/stop conditions only; volume is handled below
-    // so dragging the volume slider doesn't restart playback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot.status, snapshot.type, settings.musicSource, settings.ambient, customTrackSrc])
-
-  useEffect(() => {
-    soundEngine.setAmbientVolume(settings.ambientVolume)
-    musicEngine.setVolume(settings.ambientVolume)
-  }, [settings.ambientVolume])
 
   /* --------------------------- completion --------------------------- */
 
