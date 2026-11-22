@@ -145,13 +145,14 @@ export function spotifyEmbedUrl(ref: SpotifyRef): string {
 }
 
 /**
- * Fixed embed height in SoundCard per Spotify content type:
- * - 80px for single tracks
- * - 152px for playlists, albums, shows, artists, and episodes
- * Never uses the 352px variant, which leaves an opaque white area below Spotify's player.
+ * Fixed embed height in SoundCard across all Spotify content types.
+ * In the narrow Timer sidebar (~285px) and mobile columns, Spotify renders its
+ * compact 80px horizontal player for playlists/albums/shows as well as tracks;
+ * taller heights (152px/352px) leave an opaque white iframe block underneath.
  */
-export function spotifyEmbedHeight(ref: SpotifyRef): number {
-  return ref.type === 'track' ? 80 : 152
+export function spotifyEmbedHeight(_ref?: SpotifyRef): number {
+  void _ref
+  return 80
 }
 
 /**

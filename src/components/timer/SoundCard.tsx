@@ -85,7 +85,7 @@ export function SoundCard() {
         />
       </div>
 
-      {nowPlaying ? (
+      {nowPlaying && nowPlaying.source !== 'spotify' ? (
         <div className="mt-4">
           <NowPlayingBar variant="inline" />
         </div>

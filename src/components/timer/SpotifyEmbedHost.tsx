@@ -3,7 +3,7 @@ import { ChevronDown } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAudio } from '../../context/AudioContext'
 import { useSettings } from '../../context/SettingsContext'
-import { spotifyEmbedUrl } from '../../lib/music'
+import { spotifyEmbedHeight, spotifyEmbedUrl, spotifyMiniHeight } from '../../lib/music'
 
 interface Rect {
   top: number
@@ -105,6 +105,7 @@ export function SpotifyEmbedHost() {
 
   if (!active || !spotifyRef) return null
 
+  const targetHeight = focusMode ? spotifyMiniHeight(spotifyRef) : spotifyEmbedHeight(spotifyRef)
   const rect = activeSlot && measured?.slot === activeSlot ? measured.rect : null
   const visible = Boolean(activeSlot && rect)
 
@@ -118,7 +119,7 @@ export function SpotifyEmbedHost() {
           top: rect.top,
           left: rect.left,
           width: rect.width,
-          height: rect.height,
+          height: targetHeight,
           zIndex: focusMode ? 76 : 10,
           opacity: 1,
           pointerEvents: 'auto',
@@ -130,7 +131,7 @@ export function SpotifyEmbedHost() {
           top: 0,
           left: 0,
           width: 320,
-          height: 80,
+          height: targetHeight,
           zIndex: -1,
           opacity: 0,
           pointerEvents: 'none',
@@ -145,8 +146,9 @@ export function SpotifyEmbedHost() {
       className="transition-opacity duration-200 ease-out"
     >
       <div
+        style={{ height: targetHeight }}
         className={clsx(
-          'h-full w-full overflow-hidden rounded-2xl border border-black/10 dark:border-white/10',
+          'w-full overflow-hidden rounded-2xl ring-1 ring-black/10 dark:ring-white/10',
           focusMode ? 'bg-card/80 shadow-lift dark:bg-card/60' : 'bg-transparent',
         )}
       >
@@ -154,15 +156,16 @@ export function SpotifyEmbedHost() {
           title="Spotify player"
           src={spotifyEmbedUrl(spotifyRef)}
           width="100%"
-          height="100%"
+          height={targetHeight}
           referrerPolicy="no-referrer"
           sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation"
           allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          className="rounded-2xl"
           style={{
             border: 0,
             display: 'block',
             width: '100%',
-            height: '100%',
+            height: targetHeight,
             backgroundColor: 'transparent',
             colorScheme: 'dark',
           }}
