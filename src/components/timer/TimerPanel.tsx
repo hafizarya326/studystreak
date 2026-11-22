@@ -27,6 +27,25 @@ import { formatClock } from '../../lib/date'
 import { spotifyMiniHeight } from '../../lib/music'
 import { LIMITS } from '../../lib/security'
 
+const FOCUS_MODE_STORAGE_KEY = 'studystreak.v1:focus_mode'
+
+function readSavedFocusMode(): boolean {
+  try {
+    return window.sessionStorage.getItem(FOCUS_MODE_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeSavedFocusMode(active: boolean): void {
+  try {
+    if (active) window.sessionStorage.setItem(FOCUS_MODE_STORAGE_KEY, '1')
+    else window.sessionStorage.removeItem(FOCUS_MODE_STORAGE_KEY)
+  } catch {
+    /* sessionStorage may be unavailable */
+  }
+}
+
 const MODES = [
   { value: 'pomodoro' as const, label: 'Pomodoro' },
   { value: 'short' as const, label: 'Short Break' },
@@ -57,7 +76,7 @@ export function TimerPanel({
     dismissSpotifyPlayHint,
     registerSpotifySlot,
   } = useAudio()
-  const [focusMode, setFocusMode] = useState(false)
+  const [focusMode, setFocusMode] = useState<boolean>(() => (showSetup ? readSavedFocusMode() : false))
 
   const audioRef = useRef({ nowPlaying, skipNext, skipPrev })
   useEffect(() => {
@@ -66,13 +85,36 @@ export function TimerPanel({
 
   // Keep AudioContext aware of Focus Mode so the persistent SpotifyEmbedHost
   // repositions its single <iframe> without ever unmounting or reloading it.
+  // IMPORTANT: Do NOT clear `registerSpotifySlot('fullscreen', null)` in the
+  // `[focusMode]` effect cleanup — React attaches the slot callback ref during
+  // commit BEFORE running the previous effect's cleanup, so clearing there
+  // wipes out the newly mounted fullscreen slot in production builds.
   useEffect(() => {
     setAudioFocusMode(focusMode)
+    if (showSetup) writeSavedFocusMode(focusMode)
+  }, [focusMode, showSetup, setAudioFocusMode])
+
+  // Clean up only on unmount (slot unmount itself also triggers callback ref with null).
+  useEffect(() => {
     return () => {
       setAudioFocusMode(false)
       registerSpotifySlot('fullscreen', null)
     }
-  }, [focusMode, setAudioFocusMode, registerSpotifySlot])
+  }, [setAudioFocusMode, registerSpotifySlot])
+
+  // Lock page scroll while Focus Mode is open so the underlying page scrollbar
+  // never shows along the right edge of the 100dvh overlay.
+  useEffect(() => {
+    if (!focusMode) return
+    const prevBodyOverflow = document.body.style.overflow
+    const prevHtmlOverflow = document.documentElement.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prevBodyOverflow
+      document.documentElement.style.overflow = prevHtmlOverflow
+    }
+  }, [focusMode])
 
   const spotifyFullscreenSlotRef = useCallback(
     (el: HTMLDivElement | null) => {

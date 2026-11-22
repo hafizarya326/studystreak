@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useState, type CSSProperties } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAudio } from '../../context/AudioContext'
@@ -12,8 +12,14 @@ interface Rect {
   height: number
 }
 
+const useIsomorphicLayoutEffect =
+  typeof window !== 'undefined' ? useLayoutEffect : useEffect
+
 /**
- * Single persistent Spotify embed host mounted once at the AppLayout root.
+ * Single persistent Spotify embed host mounted once at the AppLayout root
+ * (which lives inside `document.documentElement`, so it remains inside the
+ * browser's fullscreen subtree when `document.documentElement.requestFullscreen()`
+ * is active).
  *
  * CRITICAL: Browsers reload an <iframe> whenever it is unmounted OR moved to a
  * different DOM parent (including retargeting a React portal), which restarts
@@ -50,12 +56,15 @@ export function SpotifyEmbedHost() {
 
   const [measured, setMeasured] = useState<{ slot: HTMLDivElement; rect: Rect } | null>(null)
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!active || !activeSlot) return
 
-    let raf = 0
+    let raf1 = 0
+    let raf2 = 0
+    let alive = true
+
     const measure = () => {
-      raf = 0
+      if (!alive) return
       const box = activeSlot.getBoundingClientRect()
       if (box.width <= 0 || box.height <= 0) {
         setMeasured((prev) => (prev?.slot === activeSlot ? null : prev))
@@ -80,25 +89,69 @@ export function SpotifyEmbedHost() {
     }
 
     const schedule = () => {
-      if (raf) return
-      raf = window.requestAnimationFrame(measure)
+      if (raf1) window.cancelAnimationFrame(raf1)
+      if (raf2) window.cancelAnimationFrame(raf2)
+      raf1 = window.requestAnimationFrame(() => {
+        raf1 = 0
+        measure()
+      })
     }
 
-    schedule()
+    // Re-measure on two consecutive animation frames after transitions
+    // (fullscreenchange, collapse/expand, initial mount) so layout has settled.
+    const scheduleSettled = () => {
+      if (raf1) window.cancelAnimationFrame(raf1)
+      if (raf2) window.cancelAnimationFrame(raf2)
+      raf1 = window.requestAnimationFrame(() => {
+        raf1 = 0
+        measure()
+        raf2 = window.requestAnimationFrame(() => {
+          raf2 = 0
+          measure()
+        })
+      })
+    }
+
+    // Measure immediately inside layout effect + settle on next animation frames.
+    measure()
+    scheduleSettled()
+
     window.addEventListener('scroll', schedule, { capture: true, passive: true })
-    window.addEventListener('resize', schedule, { passive: true })
+    window.addEventListener('resize', scheduleSettled, { passive: true })
+    document.addEventListener('fullscreenchange', scheduleSettled)
+    document.addEventListener('webkitfullscreenchange', scheduleSettled)
+    document.addEventListener('transitionend', scheduleSettled, { capture: true })
+
+    const fontsReady = document.fonts?.ready
+    if (fontsReady) {
+      void fontsReady.then(() => {
+        if (alive) scheduleSettled()
+      })
+    }
 
     let ro: ResizeObserver | null = null
     if (typeof ResizeObserver !== 'undefined') {
       ro = new ResizeObserver(schedule)
       ro.observe(activeSlot)
+      // Observe immediate slot ancestors so CSS height transitions (e.g.
+      // collapse/expand 40px <-> 80px) keep the fixed iframe locked to the slot.
+      if (activeSlot.parentElement) ro.observe(activeSlot.parentElement)
+      if (activeSlot.parentElement?.parentElement) {
+        ro.observe(activeSlot.parentElement.parentElement)
+      }
+      if (document.documentElement) ro.observe(document.documentElement)
       if (document.body) ro.observe(document.body)
     }
 
     return () => {
-      if (raf) window.cancelAnimationFrame(raf)
+      alive = false
+      if (raf1) window.cancelAnimationFrame(raf1)
+      if (raf2) window.cancelAnimationFrame(raf2)
       window.removeEventListener('scroll', schedule, { capture: true })
-      window.removeEventListener('resize', schedule)
+      window.removeEventListener('resize', scheduleSettled)
+      document.removeEventListener('fullscreenchange', scheduleSettled)
+      document.removeEventListener('webkitfullscreenchange', scheduleSettled)
+      document.removeEventListener('transitionend', scheduleSettled, { capture: true })
       ro?.disconnect()
     }
   }, [active, activeSlot, focusMode, spotifyMiniCollapsed])
@@ -110,8 +163,8 @@ export function SpotifyEmbedHost() {
   const visible = Boolean(activeSlot && rect)
 
   // When collapsed or off-page, keep the iframe mounted with non-zero dimensions
-  // and `opacity: 0; pointer-events: none` (never `display: none`) so browsers
-  // do not reload, throttle, or pause playback.
+  // and `visibility: hidden; opacity: 0; pointer-events: none` (never `display: none`)
+  // so browsers neither reload/pause audio nor paint a ghost layer at (0, 0).
   const containerStyle: CSSProperties =
     visible && rect
       ? {
@@ -121,6 +174,7 @@ export function SpotifyEmbedHost() {
           width: rect.width,
           height: targetHeight,
           zIndex: focusMode ? 76 : 10,
+          visibility: 'visible',
           opacity: 1,
           pointerEvents: 'auto',
           colorScheme: 'dark',
@@ -133,6 +187,7 @@ export function SpotifyEmbedHost() {
           width: 320,
           height: targetHeight,
           zIndex: -1,
+          visibility: 'hidden',
           opacity: 0,
           pointerEvents: 'none',
           colorScheme: 'dark',
@@ -146,7 +201,7 @@ export function SpotifyEmbedHost() {
       className="transition-opacity duration-200 ease-out"
     >
       <div
-        style={{ height: targetHeight }}
+        style={{ width: '100%', height: targetHeight }}
         className={clsx(
           'w-full overflow-hidden rounded-2xl ring-1 ring-black/10 dark:ring-white/10',
           focusMode ? 'bg-card/80 shadow-lift dark:bg-card/60' : 'bg-transparent',
@@ -160,7 +215,7 @@ export function SpotifyEmbedHost() {
           referrerPolicy="no-referrer"
           sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation"
           allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-          className="rounded-2xl"
+          className="block w-full rounded-2xl"
           style={{
             border: 0,
             display: 'block',

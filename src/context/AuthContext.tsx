@@ -195,6 +195,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     soundEngine.stopAmbient()
     musicEngine.stop()
+    try {
+      window.sessionStorage.removeItem('studystreak.v1:focus_mode')
+    } catch {
+      /* sessionStorage may be unavailable */
+    }
     await repository.setActiveUserId(null)
     setUser(null)
   }, [])
@@ -235,6 +240,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return
     soundEngine.stopAmbient()
     musicEngine.stop()
+    try {
+      window.sessionStorage.removeItem('studystreak.v1:focus_mode')
+    } catch {
+      /* sessionStorage may be unavailable */
+    }
     await deleteUserTracks(user.id)
     await repository.deleteUser(user.id)
     await repository.setActiveUserId(null)
